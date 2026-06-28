@@ -251,12 +251,19 @@ private fun LaunchZoom(anim: LaunchAnim, progress: Float, iconLoader: IconLoader
         val t = progress
 
         val start = anim.bounds ?: Rect(w * 0.42f, h * 0.42f, w * 0.58f, h * 0.58f)
-        val over = 0.06f // overshoot past the edges so the tile's corners aren't visible
+        // Grow to a rect with the SAME aspect ratio as the tile, centered and large enough to
+        // cover the screen. Keeping the aspect constant means ContentScale.Crop never re-crops, so
+        // the artwork scales uniformly instead of drifting sideways near the end.
+        val ratio = if (start.height > 0f) start.width / start.height else w / h
+        val endW = w * 1.18f
+        val endH = endW / ratio
+        val cx = w / 2f
+        val cy = h / 2f
         val cur = Rect(
-            left = lerp(start.left, -w * over, t),
-            top = lerp(start.top, -h * over, t),
-            right = lerp(start.right, w * (1f + over), t),
-            bottom = lerp(start.bottom, h * (1f + over), t),
+            left = lerp(start.left, cx - endW / 2f, t),
+            top = lerp(start.top, cy - endH / 2f, t),
+            right = lerp(start.right, cx + endW / 2f, t),
+            bottom = lerp(start.bottom, cy + endH / 2f, t),
         )
         val density = LocalDensity.current
         // A container that fades in over the icon: 0% at the start, 100% at the end of the zoom.
