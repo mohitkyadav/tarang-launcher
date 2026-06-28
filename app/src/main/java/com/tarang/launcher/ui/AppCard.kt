@@ -20,6 +20,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -36,15 +38,15 @@ import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
 import com.tarang.launcher.data.TileArt
 
-private val TileShape = RoundedCornerShape(14.dp)
+private val TileShape = RoundedCornerShape(24.dp)
 val TileWidth = 190.dp
 val TileHeight = 114.dp // 5:3, tvOS-style wide tile
 
 /**
- * One app tile, tvOS-style: a wide banner-artwork tile that scales up with a soft white glow on
- * focus, and a name that fades in (space reserved, so the grid never reflows) only when focused.
- * Apps without a banner fall back to their icon centered on a color drawn from it.
- * Long-press pins/unpins the app to the dock.
+ * One app tile: a wide banner-artwork tile that scales up with a soft white glow on focus, and a
+ * name that fades in only when focused. Apps without a banner fall back to their icon on a color.
+ * Long-press pins/unpins to the dock. [upFocusRequester], when set, redirects D-pad UP (used so the
+ * top row always reaches the settings button).
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -55,6 +57,7 @@ fun AppCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
+    upFocusRequester: FocusRequester? = null,
 ) {
     val tile: TileArt? by produceState<TileArt?>(initialValue = null, app.packageName) {
         value = iconLoader.loadTile(app)
@@ -72,6 +75,13 @@ fun AppCard(
             onLongClick = onLongClick,
             modifier = Modifier
                 .size(width = TileWidth, height = TileHeight)
+                .then(
+                    if (upFocusRequester != null) {
+                        Modifier.focusProperties { up = upFocusRequester }
+                    } else {
+                        Modifier
+                    },
+                )
                 .onFocusChanged {
                     focused = it.isFocused
                     if (it.isFocused) onFocused()
@@ -103,7 +113,7 @@ fun AppCard(
                     }
                 }
 
-                null -> Box(modifier = Modifier.fillMaxSize()) // loading
+                null -> Box(modifier = Modifier.fillMaxSize())
             }
         }
         Text(

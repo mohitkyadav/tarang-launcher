@@ -8,6 +8,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.AppRepository
 import com.tarang.launcher.data.FavoritesStore
+import com.tarang.launcher.data.LauncherSettings
+import com.tarang.launcher.data.SettingsStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +29,7 @@ data class LauncherUiState(
 class LauncherViewModel(
     private val repository: AppRepository,
     private val favoritesStore: FavoritesStore,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     private val apps = MutableStateFlow<List<AppInfo>>(emptyList())
@@ -36,7 +39,6 @@ class LauncherViewModel(
     val uiState: StateFlow<LauncherUiState> =
         combine(loading, apps, favoritesStore.favorites, focusedPackage) { isLoading, allApps, favorites, focused ->
             val favoriteSet = favorites.toSet()
-            // Dock = favorites in saved order, resolved to installed apps; grid = everything else.
             val dock = favorites.mapNotNull { pkg -> allApps.firstOrNull { it.packageName == pkg } }
             val grid = allApps.filterNot { it.packageName in favoriteSet }
             LauncherUiState(
@@ -48,6 +50,9 @@ class LauncherViewModel(
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LauncherUiState())
 
+    val settings: StateFlow<LauncherSettings> =
+        settingsStore.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LauncherSettings())
+
     init {
         refresh()
     }
@@ -58,7 +63,6 @@ class LauncherViewModel(
             val loaded = repository.loadApps()
             apps.value = loaded
             loading.value = false
-            // First run: seed the dock with a few apps so it isn't empty.
             if (!favoritesStore.seeded.first()) {
                 favoritesStore.setFavorites(loaded.take(DEFAULT_DOCK_COUNT).map { it.packageName })
                 favoritesStore.markSeeded()
@@ -74,10 +78,13 @@ class LauncherViewModel(
         repository.launch(packageName)
     }
 
-    /** Long-press handler: pin to / unpin from the dock. */
     fun toggleFavorite(packageName: String) {
         viewModelScope.launch { favoritesStore.toggle(packageName) }
     }
+
+    fun setWallpaper(id: Int) = viewModelScope.launch { settingsStore.setWallpaper(id) }.let {}
+    fun setAnimated(value: Boolean) = viewModelScope.launch { settingsStore.setAnimated(value) }.let {}
+    fun setBlurred(value: Boolean) = viewModelScope.launch { settingsStore.setBlurred(value) }.let {}
 
     companion object {
         private const val DEFAULT_DOCK_COUNT = 5
@@ -85,8 +92,9 @@ class LauncherViewModel(
         fun provideFactory(
             repository: AppRepository,
             favoritesStore: FavoritesStore,
+            settingsStore: SettingsStore,
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer { LauncherViewModel(repository, favoritesStore) }
+            initializer { LauncherViewModel(repository, favoritesStore, settingsStore) }
         }
     }
 }

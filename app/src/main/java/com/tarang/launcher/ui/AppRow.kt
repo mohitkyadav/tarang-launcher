@@ -11,8 +11,9 @@ import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
 
 /**
- * A single horizontal row of [AppCard]s. Rows are stacked in a LazyColumn (see
- * [LauncherContent]); left/right moves within a row, up/down moves between rows.
+ * A single horizontal row of [AppCard]s. Rows are stacked in a LazyColumn (see [LauncherContent]).
+ * [upFocusRequester], when set, makes every card in the row redirect D-pad UP there (used so the
+ * top row reaches the settings button regardless of which tile is focused).
  */
 @Composable
 fun AppRow(
@@ -23,6 +24,7 @@ fun AppRow(
     onToggleFavorite: (String) -> Unit,
     modifier: Modifier = Modifier,
     firstCardFocusRequester: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
 ) {
     Row(
         modifier = modifier,
@@ -35,6 +37,7 @@ fun AppRow(
                 onFocused = { onAppFocused(app.packageName) },
                 onClick = { onAppClicked(app.packageName) },
                 onLongClick = { onToggleFavorite(app.packageName) },
+                upFocusRequester = upFocusRequester,
                 modifier = if (index == 0 && firstCardFocusRequester != null) {
                     Modifier.focusRequester(firstCardFocusRequester)
                 } else {
