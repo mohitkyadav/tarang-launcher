@@ -30,6 +30,7 @@ import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
 
 private val DockShape = RoundedCornerShape(36.dp)
+private val DockTopGap = 250.dp // ~500px at 2x density — drops the dock well below the clock
 
 /**
  * tvOS-style home layout: a frosted "dock" (favorites) row on top, then the rest as a grid of rows.
@@ -80,8 +81,10 @@ fun LauncherContent(
 
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 56.dp, end = 56.dp, top = 74.dp, bottom = 56.dp),
+            // Fixed top gap (not contentPadding — that's scrollable and gets eaten when the dock
+            // auto-focuses) pushes the dock down, away from the clock.
+            modifier = Modifier.fillMaxSize().padding(top = DockTopGap),
+            contentPadding = PaddingValues(start = 56.dp, end = 56.dp, top = 24.dp, bottom = 56.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
             if (hasDock) {
