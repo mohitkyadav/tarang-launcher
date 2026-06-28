@@ -20,12 +20,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -41,11 +37,8 @@ val TileHeight = 114.dp // 5:3, tvOS-style wide tile
 /**
  * One app tile: a wide banner-artwork tile that scales up on focus and lifts with a soft shadow
  * (no border). Apps without a banner fall back to their icon on a color. Long-press pins/unpins
- * (grid) or lifts the tile into move mode (dock).
- *
- * [onBoundsChanged] reports the tile's on-screen rect while focused, so the launch transition can
- * zoom out from exactly where the tile sits. In move mode, [isMoving] lifts the tile a little more
- * and [dimmed] fades the tiles that aren't being moved.
+ * (grid) or lifts the tile into move mode (dock). In move mode, [isMoving] lifts the tile a little
+ * more and [dimmed] fades the tiles that aren't being moved.
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -57,7 +50,6 @@ fun AppCard(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     upFocusRequester: FocusRequester? = null,
-    onBoundsChanged: (Rect) -> Unit = {},
     isMoving: Boolean = false,
     dimmed: Boolean = false,
 ) {
@@ -65,7 +57,6 @@ fun AppCard(
         value = iconLoader.loadTile(app)
     }
 
-    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var focused by remember { mutableStateOf(false) }
 
     val elevation by animateDpAsState(
@@ -87,13 +78,9 @@ fun AppCard(
             .then(
                 if (upFocusRequester != null) Modifier.focusProperties { up = upFocusRequester } else Modifier,
             )
-            .onGloballyPositioned { coords = it }
             .onFocusChanged {
                 focused = it.isFocused
-                if (it.isFocused) {
-                    onFocused()
-                    coords?.takeIf { c -> c.isAttached }?.let { c -> onBoundsChanged(c.boundsInRoot()) }
-                }
+                if (it.isFocused) onFocused()
             },
         shape = ClickableSurfaceDefaults.shape(TileShape),
         scale = ClickableSurfaceDefaults.scale(focusedScale = if (isMoving) 1.12f else 1.1f),

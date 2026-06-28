@@ -25,7 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,7 +67,6 @@ private val MinimalBringIntoView = object : BringIntoViewSpec {
  *
  * Interactions: long-press a grid tile to pin it to the dock ([onToggleFavorite]); long-press a dock
  * tile to "lift" it into move mode and rearrange/remove it (committed via [onReorder]).
- * [onAppBounds] reports the focused tile's rect for the launch transition.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -82,7 +80,6 @@ fun LauncherContent(
     onReorder: (List<String>) -> Unit,
     modifier: Modifier = Modifier,
     topFocusRequester: FocusRequester? = null,
-    onAppBounds: (Rect) -> Unit = {},
 ) {
     val gridRows = remember(gridApps) { gridApps.chunked(COLUMNS) }
     val firstCard = remember { FocusRequester() }
@@ -134,7 +131,6 @@ fun LauncherContent(
                             onAppLongPressed = { movingPackage = it }, // lift into move mode
                             firstCardFocusRequester = firstCard,
                             upFocusRequester = topFocusRequester,
-                            onAppBounds = onAppBounds,
                             movingPackage = movingPackage,
                             onMove = ::moveBy,
                             onRemoveFromDock = ::removeMoving,
@@ -153,7 +149,6 @@ fun LauncherContent(
                     firstCardFocusRequester = if (!hasDock && index == 0) firstCard else null,
                     // Only the very top row sends UP to the settings button.
                     upFocusRequester = if (!hasDock && index == 0) topFocusRequester else null,
-                    onAppBounds = onAppBounds,
                 )
             }
         }

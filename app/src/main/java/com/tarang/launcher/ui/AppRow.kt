@@ -8,7 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -39,7 +38,6 @@ fun AppRow(
     modifier: Modifier = Modifier,
     firstCardFocusRequester: FocusRequester? = null,
     upFocusRequester: FocusRequester? = null,
-    onAppBounds: (Rect) -> Unit = {},
     movingPackage: String? = null,
     onMove: (Int) -> Unit = {},
     onRemoveFromDock: () -> Unit = {},
@@ -77,7 +75,6 @@ fun AppRow(
                 onClick = { onAppClicked(app.packageName) },
                 onLongClick = { onAppLongPressed(app.packageName) },
                 upFocusRequester = upFocusRequester,
-                onBoundsChanged = onAppBounds,
                 isMoving = isMoving,
                 dimmed = movingPackage != null && !isMoving,
                 modifier = if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier,
