@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -15,53 +15,58 @@ import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
 
 /**
- * tvOS-style home layout: a "dock" (favorites) row on top, then the remaining apps as a grid
- * of rows. Implemented as a LazyColumn of rows rather than LazyVerticalGrid for reliable D-pad
- * focus traversal on TV. The dock is a placeholder (the first row of apps) until M4 adds
- * editable, persisted favorites.
+ * tvOS-style home layout: a "dock" (favorites) row on top, then the remaining apps as a grid of
+ * rows. Implemented as a LazyColumn of rows rather than LazyVerticalGrid for reliable D-pad focus
+ * traversal on TV. Long-pressing a tile pins/unpins it (handled upstream via [onToggleFavorite]).
  */
 @Composable
 fun LauncherContent(
-    apps: List<AppInfo>,
+    dockApps: List<AppInfo>,
+    gridApps: List<AppInfo>,
     iconLoader: IconLoader,
     onAppFocused: (String) -> Unit,
     onAppClicked: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val dock = remember(apps) { apps.take(DOCK_SIZE) }
-    val gridRows = remember(apps) { apps.drop(DOCK_SIZE).chunked(COLUMNS) }
+    val gridRows = remember(gridApps) { gridApps.chunked(COLUMNS) }
     val firstCard = remember { FocusRequester() }
+    val hasDock = dockApps.isNotEmpty()
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 24.dp, bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(36.dp),
     ) {
-        if (dock.isNotEmpty()) {
+        if (hasDock) {
             item(key = "dock") {
                 AppRow(
-                    apps = dock,
+                    apps = dockApps,
                     iconLoader = iconLoader,
                     onAppFocused = onAppFocused,
                     onAppClicked = onAppClicked,
+                    onToggleFavorite = onToggleFavorite,
                     firstCardFocusRequester = firstCard,
                 )
             }
         }
-        items(gridRows, key = { row -> row.first().packageName }) { row ->
+        itemsIndexed(gridRows, key = { _, row -> row.first().packageName }) { index, row ->
             AppRow(
                 apps = row,
                 iconLoader = iconLoader,
                 onAppFocused = onAppFocused,
                 onAppClicked = onAppClicked,
+                onToggleFavorite = onToggleFavorite,
+                // If there is no dock, land initial focus on the first grid row instead.
+                firstCardFocusRequester = if (!hasDock && index == 0) firstCard else null,
             )
         }
     }
 
-    LaunchedEffect(apps.firstOrNull()?.packageName) {
-        if (apps.isNotEmpty()) runCatching { firstCard.requestFocus() }
+    val firstPackage = dockApps.firstOrNull()?.packageName ?: gridApps.firstOrNull()?.packageName
+    LaunchedEffect(firstPackage) {
+        if (firstPackage != null) runCatching { firstCard.requestFocus() }
     }
 }
 
-private const val DOCK_SIZE = 6
 private const val COLUMNS = 6

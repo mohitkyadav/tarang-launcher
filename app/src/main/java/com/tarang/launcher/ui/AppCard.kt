@@ -37,6 +37,7 @@ private val IconSquircle = SquircleShape()
 /**
  * One app tile, tvOS-style: a squircle-clipped icon that scales up with a soft white glow on
  * focus, and a name that fades in (space reserved, so the grid never reflows) only when focused.
+ * Long-press pins/unpins the app to the dock.
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -45,6 +46,7 @@ fun AppCard(
     iconLoader: IconLoader,
     onFocused: () -> Unit,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val icon: ImageBitmap? by produceState<ImageBitmap?>(initialValue = null, app.packageName) {
@@ -60,6 +62,7 @@ fun AppCard(
     ) {
         Surface(
             onClick = onClick,
+            onLongClick = onLongClick,
             modifier = Modifier
                 .size(104.dp)
                 .onFocusChanged {

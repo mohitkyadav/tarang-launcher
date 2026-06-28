@@ -20,6 +20,7 @@ fun AppRow(
     iconLoader: IconLoader,
     onAppFocused: (String) -> Unit,
     onAppClicked: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
     modifier: Modifier = Modifier,
     firstCardFocusRequester: FocusRequester? = null,
 ) {
@@ -33,6 +34,7 @@ fun AppRow(
                 iconLoader = iconLoader,
                 onFocused = { onAppFocused(app.packageName) },
                 onClick = { onAppClicked(app.packageName) },
+                onLongClick = { onToggleFavorite(app.packageName) },
                 modifier = if (index == 0 && firstCardFocusRequester != null) {
                     Modifier.focusRequester(firstCardFocusRequester)
                 } else {

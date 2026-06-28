@@ -20,6 +20,7 @@ import com.tarang.launcher.viewmodel.LauncherViewModel
 /**
  * Top-level launcher UI: the Top Shelf hero (top ~40%) over the dock + app grid (~60%).
  * The shelf reacts to the focused app, which the grid reports up through the ViewModel.
+ * Long-press a tile to pin/unpin it from the dock.
  */
 @Composable
 fun LauncherScreen(
@@ -27,17 +28,17 @@ fun LauncherScreen(
     modifier: Modifier = Modifier,
 ) {
     val viewModel: LauncherViewModel = viewModel(
-        factory = LauncherViewModel.provideFactory(container.appRepository),
+        factory = LauncherViewModel.provideFactory(container.appRepository, container.favoritesStore),
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         when {
             uiState.isLoading -> Text("Loading apps…", color = Color.White, fontSize = 20.sp)
-            uiState.apps.isEmpty() -> Text("No apps found", color = Color.White, fontSize = 20.sp)
+            uiState.allApps.isEmpty() -> Text("No apps found", color = Color.White, fontSize = 20.sp)
             else -> {
-                val focusedApp = remember(uiState.focusedPackage, uiState.apps) {
-                    uiState.apps.firstOrNull { it.packageName == uiState.focusedPackage }
+                val focusedApp = remember(uiState.focusedPackage, uiState.allApps) {
+                    uiState.allApps.firstOrNull { it.packageName == uiState.focusedPackage }
                 }
                 Column(modifier = Modifier.fillMaxSize()) {
                     TopShelf(
@@ -48,10 +49,12 @@ fun LauncherScreen(
                             .weight(TOP_SHELF_WEIGHT),
                     )
                     LauncherContent(
-                        apps = uiState.apps,
+                        dockApps = uiState.dockApps,
+                        gridApps = uiState.gridApps,
                         iconLoader = container.iconLoader,
                         onAppFocused = viewModel::onAppFocused,
                         onAppClicked = viewModel::launchApp,
+                        onToggleFavorite = viewModel::toggleFavorite,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(GRID_WEIGHT),
