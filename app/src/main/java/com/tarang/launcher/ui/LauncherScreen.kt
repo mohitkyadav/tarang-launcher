@@ -102,8 +102,13 @@ fun LauncherScreen(
     val pickImage: () -> Unit = { showPicker = true }
     var showTvProbe by remember { mutableStateOf(false) }
 
-    val focusedApp = remember(uiState.focusedPackage, uiState.allApps) {
-        uiState.allApps.firstOrNull { it.packageName == uiState.focusedPackage }
+    val focusedPkg by viewModel.focusedPackage.collectAsStateWithLifecycle()
+    val focusedApp = remember(focusedPkg, uiState.allApps) {
+        uiState.allApps.firstOrNull { it.packageName == focusedPkg }
+    }
+    // Filter the hidden apps once (not on every recomposition) so the grid list stays stable.
+    val visibleGrid = remember(uiState.gridApps, settings.hiddenApps) {
+        uiState.gridApps.filterNot { it.packageName in settings.hiddenApps }
     }
     val ambient: Color? by produceState<Color?>(
         initialValue = null,
@@ -226,8 +231,6 @@ fun LauncherScreen(
                 onToggleArtworkApp = viewModel::setArtworkApp,
                 theme = settings.theme,
                 onTheme = viewModel::setTheme,
-                showContinueRow = settings.showContinueRow,
-                onShowContinueRow = viewModel::setShowContinueRow,
                 reduceMotion = settings.reduceMotion,
                 onReduceMotion = viewModel::setReduceMotion,
                 hiddenApps = uiState.allApps.filter { it.packageName in settings.hiddenApps },
@@ -240,14 +243,18 @@ fun LauncherScreen(
             )
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
-                TopBar(onOpenSettings = { showSettings = true }, tuneFocus = tuneFocus, backdrop = backdrop)
+                TopBar(
+                    onOpenSettings = { showSettings = true },
+                    tuneFocus = tuneFocus,
+                    backdrop = backdrop,
+                )
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     when {
                         uiState.isLoading -> Centered { Text("Loading apps…", color = colors.text, fontSize = 20.sp) }
                         uiState.allApps.isEmpty() -> Centered { Text("No apps found", color = colors.text, fontSize = 20.sp) }
                         else -> LauncherContent(
                             dockApps = uiState.dockApps,
-                            gridApps = uiState.gridApps.filterNot { it.packageName in settings.hiddenApps },
+                            gridApps = visibleGrid,
                             iconLoader = container.iconLoader,
                             onAppFocused = viewModel::onAppFocused,
                             onAppClicked = { viewModel.launchApp(it) },
@@ -257,10 +264,6 @@ fun LauncherScreen(
                             backdrop = backdrop,
                             topFocusRequester = tuneFocus,
                             onFavoriteHover = { favoriteHover = it },
-                            accent = ambient,
-                            watchNext = uiState.watchNext,
-                            showContinueRow = settings.showContinueRow,
-                            onWatchNextClick = { viewModel.launchWatchNext(it) },
                             reduceMotion = settings.reduceMotion,
                             onHideApp = { viewModel.setAppHidden(it, true) },
                             modifier = Modifier.fillMaxSize(),
@@ -293,7 +296,11 @@ fun LauncherScreen(
 }
 
 @Composable
-private fun TopBar(onOpenSettings: () -> Unit, tuneFocus: FocusRequester, backdrop: GraphicsLayer) {
+private fun TopBar(
+    onOpenSettings: () -> Unit,
+    tuneFocus: FocusRequester,
+    backdrop: GraphicsLayer,
+) {
     val context = LocalContext.current
     val net = rememberNetStatus()
     val colors = LocalLauncherColors.current

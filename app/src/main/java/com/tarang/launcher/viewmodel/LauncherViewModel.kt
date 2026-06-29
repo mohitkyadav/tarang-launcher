@@ -26,7 +26,6 @@ data class LauncherUiState(
     val dockApps: List<AppInfo> = emptyList(),
     val gridApps: List<AppInfo> = emptyList(),
     val allApps: List<AppInfo> = emptyList(),
-    val focusedPackage: String? = null,
     val watchNext: List<WatchNextItem> = emptyList(),
 )
 
@@ -39,11 +38,15 @@ class LauncherViewModel(
 
     private val apps = MutableStateFlow<List<AppInfo>>(emptyList())
     private val loading = MutableStateFlow(true)
-    private val focusedPackage = MutableStateFlow<String?>(null)
+    private val _focusedPackage = MutableStateFlow<String?>(null)
     private val watchNext = MutableStateFlow<List<WatchNextItem>>(emptyList())
 
+    /** The currently focused app package — drives the ambient wallpaper glow. Kept OUT of [uiState]
+     *  so moving focus doesn't recompute the dock/grid lists (and recompose the grid) on every press. */
+    val focusedPackage: StateFlow<String?> = _focusedPackage
+
     val uiState: StateFlow<LauncherUiState> =
-        combine(loading, apps, favoritesStore.favorites, focusedPackage, watchNext) { isLoading, allApps, favorites, focused, watchNextItems ->
+        combine(loading, apps, favoritesStore.favorites, watchNext) { isLoading, allApps, favorites, watchNextItems ->
             val favoriteSet = favorites.toSet()
             val dock = favorites.mapNotNull { pkg -> allApps.firstOrNull { it.packageName == pkg } }
             val grid = allApps.filterNot { it.packageName in favoriteSet }
@@ -52,7 +55,6 @@ class LauncherViewModel(
                 dockApps = dock,
                 gridApps = grid,
                 allApps = allApps,
-                focusedPackage = focused,
                 watchNext = watchNextItems,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LauncherUiState())
@@ -86,12 +88,10 @@ class LauncherViewModel(
     }
 
     fun onAppFocused(packageName: String) {
-        if (focusedPackage.value != packageName) focusedPackage.value = packageName
+        if (_focusedPackage.value != packageName) _focusedPackage.value = packageName
     }
 
     fun launchApp(packageName: String): Boolean = repository.launch(packageName)
-
-    fun launchWatchNext(item: WatchNextItem): Boolean = repository.launchWatchNext(item)
 
     fun toggleFavorite(packageName: String) {
         viewModelScope.launch { favoritesStore.toggle(packageName) }
@@ -113,7 +113,6 @@ class LauncherViewModel(
         viewModelScope.launch { settingsStore.setArtworkApp(packageName, enabled) }.let {}
     fun setTheme(mode: com.tarang.launcher.data.ThemeMode) =
         viewModelScope.launch { settingsStore.setTheme(mode) }.let {}
-    fun setShowContinueRow(value: Boolean) = viewModelScope.launch { settingsStore.setShowContinueRow(value) }.let {}
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { settingsStore.setReduceMotion(value) }.let {}
     fun setAppHidden(packageName: String, hidden: Boolean) =
         viewModelScope.launch { settingsStore.setAppHidden(packageName, hidden) }.let {}

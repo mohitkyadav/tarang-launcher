@@ -90,8 +90,6 @@ fun SettingsScreen(
     onToggleArtworkApp: (String, Boolean) -> Unit,
     theme: ThemeMode,
     onTheme: (ThemeMode) -> Unit,
-    showContinueRow: Boolean,
-    onShowContinueRow: (Boolean) -> Unit,
     reduceMotion: Boolean,
     onReduceMotion: (Boolean) -> Unit,
     hiddenApps: List<AppInfo>,
@@ -151,8 +149,6 @@ fun SettingsScreen(
                         onToggleArtworkApp = onToggleArtworkApp,
                         theme = theme,
                         onTheme = onTheme,
-                        showContinueRow = showContinueRow,
-                        onShowContinueRow = onShowContinueRow,
                         reduceMotion = reduceMotion,
                         onReduceMotion = onReduceMotion,
                         screensaverTimeoutSec = screensaverTimeoutSec,
@@ -228,8 +224,6 @@ private fun AppearancePane(
     onToggleArtworkApp: (String, Boolean) -> Unit,
     theme: ThemeMode,
     onTheme: (ThemeMode) -> Unit,
-    showContinueRow: Boolean,
-    onShowContinueRow: (Boolean) -> Unit,
     reduceMotion: Boolean,
     onReduceMotion: (Boolean) -> Unit,
     screensaverTimeoutSec: Int,
@@ -284,12 +278,6 @@ private fun AppearancePane(
             onUseAppArtwork = onUseAppArtwork,
             onToggleArtworkApp = onToggleArtworkApp,
         )
-
-        SectionLabel("Continue watching")
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ToggleChip("Show", showContinueRow) { onShowContinueRow(true) }
-            ToggleChip("Hide", !showContinueRow) { onShowContinueRow(false) }
-        }
 
         SectionLabel("Tiles per row")
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

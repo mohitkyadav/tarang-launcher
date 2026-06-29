@@ -32,7 +32,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlurEffect
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.layer.GraphicsLayer
@@ -46,7 +45,6 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
-import com.tarang.launcher.data.WatchNextItem
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -54,13 +52,12 @@ private val DockShape = RoundedCornerShape(36.dp)
 private val SidePad = 56.dp // horizontal screen margin (matches the top bar)
 private val TileGap = 24.dp // gap between tiles in a row (matches AppRow's arrangement)
 private val DockPad = 20.dp // inner padding of the frosted dock container
-// Scrollable top space that drops the dock near the bottom (Apple-TV style). Because the bring-into-
-// view spec below won't scroll an already-visible item, the dock stays put here; it only scrolls
-// away when you move into the grid, letting the list use the full screen height without clipping.
-private val DockTopGap = 300.dp
-private val ContinueTopGap = 84.dp // smaller top gap when the Continue row occupies the upper area
-private val ContinueCardW = 220.dp // 16:9 poster cards (independent of grid column size)
-private val ContinueCardH = 124.dp
+// Resting bottom margin for the dock — kept ≤ the inter-row spacing so the first grid row stays just
+// off-screen until the user presses DOWN. The top gap is computed from the available height (see
+// below) so the dock sits near the bottom and the grid is fully below the fold (Apple-TV style). The
+// bring-into-view spec won't scroll the already-visible dock, so it stays put until you move down.
+private val DockBottomGap = 24.dp
+private val MinTopGap = 84.dp // floor for the computed top gap on very short viewports
 
 /**
  * Minimal bring-into-view: don't move an item that's already fully visible (keeps the dock low on
@@ -106,16 +103,11 @@ fun LauncherContent(
     modifier: Modifier = Modifier,
     topFocusRequester: FocusRequester? = null,
     onFavoriteHover: (String?) -> Unit = {},
-    accent: Color? = null,
-    watchNext: List<WatchNextItem> = emptyList(),
-    showContinueRow: Boolean = true,
-    onWatchNextClick: (WatchNextItem) -> Unit = {},
     reduceMotion: Boolean = false,
     onHideApp: (String) -> Unit = {},
 ) {
     val gridRows = remember(gridApps, columns) { gridApps.chunked(columns) }
     val firstCard = remember { FocusRequester() }
-    val firstContinueCard = remember { FocusRequester() }
     val hasDock = dockApps.isNotEmpty()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -158,10 +150,10 @@ fun LauncherContent(
         val dockTileW = minOf(gridTileW, (availWidth - DockPad * 2 - TileGap * (dockCount - 1)) / dockCount)
         val dockTileH = dockTileW * TILE_ASPECT
 
-        // When the Continue row is shown it takes the upper area (above the dock), so the top gap
-        // shrinks; otherwise the dock stays pinned low with the empty top gap above it.
-        val continueShown = showContinueRow && watchNext.isNotEmpty()
-        val topGap = if (continueShown) ContinueTopGap else DockTopGap
+        // Drop the dock to the bottom so ONLY it shows at rest; the grid sits fully below the fold and
+        // slides up when the user moves down into it.
+        val dockBlockH = dockTileH + DockPad * 2
+        val topGap = (maxHeight - dockBlockH - DockBottomGap).coerceAtLeast(MinTopGap)
 
         CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalBringIntoView) {
         LazyColumn(
@@ -170,19 +162,6 @@ fun LauncherContent(
             contentPadding = PaddingValues(start = SidePad, end = SidePad, top = topGap, bottom = 56.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
-            if (continueShown) {
-                item(key = "continue") {
-                    ContinueRow(
-                        items = watchNext,
-                        cardWidth = ContinueCardW,
-                        cardHeight = ContinueCardH,
-                        onClick = onWatchNextClick,
-                        animate = !reduceMotion,
-                        upFocusRequester = topFocusRequester, // UP from Continue -> settings
-                        firstCardFocusRequester = firstContinueCard, // dock UP lands here
-                    )
-                }
-            }
             if (hasDock) {
                 item(key = "dock") {
                     Box(
@@ -193,7 +172,9 @@ fun LauncherContent(
                             .onFocusChanged {
                                 if (it.hasFocus) scope.launch { listState.animateScrollToItem(0) } else onFavoriteHover(null)
                             }
-                            .frostedGlass(backdrop, DockShape, tint = colors.chrome, accent = accent)
+                            // No per-app accent on the dock: it kept re-tinting on every hover (a
+                            // visible flicker + redraw). A stable chrome tint keeps the dock calm.
+                            .frostedGlass(backdrop, DockShape, tint = colors.chrome)
                             .padding(DockPad),
                     ) {
                         AppRow(
@@ -207,9 +188,8 @@ fun LauncherContent(
                             tileHeight = dockTileH,
                             reduceMotion = reduceMotion,
                             firstCardFocusRequester = firstCard,
-                            // UP from the dock goes to the Continue row when it's shown, else the bar.
-                            // (Default focus search skips over the row to the top bar, so wire it.)
-                            upFocusRequester = if (continueShown) firstContinueCard else topFocusRequester,
+                            // UP from the dock goes to the top bar (settings button).
+                            upFocusRequester = topFocusRequester,
                             movingPackage = movingPackage,
                             onMove = ::moveBy,
                             onRemoveFromDock = ::removeMoving,

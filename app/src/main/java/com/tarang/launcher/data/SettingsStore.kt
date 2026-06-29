@@ -44,8 +44,6 @@ data class LauncherSettings(
     val artworkApps: Set<String> = emptySet(),
     /** Light/dark appearance. */
     val theme: ThemeMode = ThemeMode.DARK,
-    /** Show the "Continue watching" (Watch Next) row on the home screen. */
-    val showContinueRow: Boolean = true,
     /** Calm everything down: no wallpaper drift, slideshow, or tile-focus spring. */
     val reduceMotion: Boolean = false,
     /** Packages the user has hidden from the grid (still launchable, just out of sight). */
@@ -72,7 +70,6 @@ class SettingsStore(context: Context) {
             useAppArtwork = p[USE_APP_ARTWORK] ?: false,
             artworkApps = p[ARTWORK_APPS] ?: emptySet(),
             theme = runCatching { ThemeMode.valueOf(p[THEME] ?: "DARK") }.getOrDefault(ThemeMode.DARK),
-            showContinueRow = p[SHOW_CONTINUE_ROW] ?: true,
             reduceMotion = p[REDUCE_MOTION] ?: false,
             hiddenApps = p[HIDDEN_APPS] ?: emptySet(),
             screensaverTimeoutSec = p[SCREENSAVER_TIMEOUT] ?: 300,
@@ -110,7 +107,6 @@ class SettingsStore(context: Context) {
     }
 
     suspend fun setTheme(mode: ThemeMode) = dataStore.edit { it[THEME] = mode.name }
-    suspend fun setShowContinueRow(value: Boolean) = dataStore.edit { it[SHOW_CONTINUE_ROW] = value }
     suspend fun setReduceMotion(value: Boolean) = dataStore.edit { it[REDUCE_MOTION] = value }
 
     /** Hides/unhides an app from the grid. */
@@ -133,7 +129,6 @@ class SettingsStore(context: Context) {
         val USE_APP_ARTWORK = booleanPreferencesKey("use_app_artwork")
         val ARTWORK_APPS = stringSetPreferencesKey("artwork_apps")
         val THEME = stringPreferencesKey("theme")
-        val SHOW_CONTINUE_ROW = booleanPreferencesKey("show_continue_row")
         val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
         val HIDDEN_APPS = stringSetPreferencesKey("hidden_apps")
         val SCREENSAVER_TIMEOUT = intPreferencesKey("screensaver_timeout")

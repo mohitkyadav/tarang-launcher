@@ -91,20 +91,8 @@ class AppRepository(private val context: Context) {
             .isSuccess
     }
 
-    /** The system "Watch Next" entries (continue watching). */
+    /** The system "Watch Next" entries — used as one of the idle screensaver's artwork sources. */
     suspend fun watchNext(): List<WatchNextItem> = TvArtwork.watchNext(context)
-
-    /** Resumes a Watch Next item via its deep-link intent; falls back to launching the app. */
-    fun launchWatchNext(item: WatchNextItem): Boolean {
-        item.intentUri?.let { uri ->
-            val ok = runCatching {
-                val intent = Intent.parseUri(uri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            }.onFailure { Log.w(TAG, "Failed to resume ${item.packageName}", it) }.isSuccess
-            if (ok) return true
-        }
-        return launch(item.packageName)
-    }
 
     private companion object {
         const val TAG = "AppRepository"
