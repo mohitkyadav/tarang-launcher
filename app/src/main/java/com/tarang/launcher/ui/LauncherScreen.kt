@@ -117,30 +117,10 @@ fun LauncherScreen(
             )
         }
 
-        Column(modifier = Modifier.fillMaxSize()) {
-            TopBar(onOpenSettings = { showSettings = true }, tuneFocus = tuneFocus)
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                when {
-                    uiState.isLoading -> Centered { Text("Loading apps…", color = Color.White, fontSize = 20.sp) }
-                    uiState.allApps.isEmpty() -> Centered { Text("No apps found", color = Color.White, fontSize = 20.sp) }
-                    else -> LauncherContent(
-                        dockApps = uiState.dockApps,
-                        gridApps = uiState.gridApps,
-                        iconLoader = container.iconLoader,
-                        onAppFocused = viewModel::onAppFocused,
-                        onAppClicked = { viewModel.launchApp(it) },
-                        onToggleFavorite = viewModel::toggleFavorite,
-                        onReorder = viewModel::setFavoritesOrder,
-                        columns = settings.columns,
-                        topFocusRequester = tuneFocus,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
+        // The settings page takes over the whole screen (not a modal), so D-pad focus can't reach
+        // the launcher behind it; the launcher isn't composed while settings is open.
         if (showSettings) {
-            SettingsPanel(
+            SettingsScreen(
                 settings = settings,
                 onWallpaper = viewModel::setWallpaper,
                 onAnimated = viewModel::setAnimated,
@@ -149,8 +129,30 @@ fun LauncherScreen(
                 onPickImage = pickImage,
                 onUseImage = { viewModel.setUseImageWallpaper(true) },
                 onScanTvContent = { showTvProbe = true },
-                onDismiss = { showSettings = false },
+                onClose = { showSettings = false },
             )
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
+                TopBar(onOpenSettings = { showSettings = true }, tuneFocus = tuneFocus)
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    when {
+                        uiState.isLoading -> Centered { Text("Loading apps…", color = Color.White, fontSize = 20.sp) }
+                        uiState.allApps.isEmpty() -> Centered { Text("No apps found", color = Color.White, fontSize = 20.sp) }
+                        else -> LauncherContent(
+                            dockApps = uiState.dockApps,
+                            gridApps = uiState.gridApps,
+                            iconLoader = container.iconLoader,
+                            onAppFocused = viewModel::onAppFocused,
+                            onAppClicked = { viewModel.launchApp(it) },
+                            onToggleFavorite = viewModel::toggleFavorite,
+                            onReorder = viewModel::setFavoritesOrder,
+                            columns = settings.columns,
+                            topFocusRequester = tuneFocus,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
         }
 
         if (showPicker) {
