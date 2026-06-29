@@ -17,6 +17,10 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- Read apps' home-screen preview channels/programs (the TV content carousel probe). Whether a
+         non-system launcher is actually allowed to read other packages' rows is what we're testing. -->
+    <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
+
     <!-- TV app: no touchscreen; leanback optional so it still runs on phone/emulator. -->
     <uses-feature
         android:name="android.software.leanback"

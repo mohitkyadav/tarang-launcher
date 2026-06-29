@@ -84,6 +84,7 @@ fun LauncherScreen(
         }
     }
     val pickImage: () -> Unit = { showPicker = true }
+    var showTvProbe by remember { mutableStateOf(false) }
 
     val focusedApp = remember(uiState.focusedPackage, uiState.allApps) {
         uiState.allApps.firstOrNull { it.packageName == uiState.focusedPackage }
@@ -147,12 +148,17 @@ fun LauncherScreen(
                 onColumns = viewModel::setColumns,
                 onPickImage = pickImage,
                 onUseImage = { viewModel.setUseImageWallpaper(true) },
+                onScanTvContent = { showTvProbe = true },
                 onDismiss = { showSettings = false },
             )
         }
 
         if (showPicker) {
             ImagePickerDialog(onPick = { applyPickedImage(it) }, onDismiss = { showPicker = false })
+        }
+
+        if (showTvProbe) {
+            TvProbeDialog(onDismiss = { showTvProbe = false })
         }
     }
 }

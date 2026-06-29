@@ -50,6 +50,7 @@ fun SettingsPanel(
     onColumns: (Int) -> Unit,
     onPickImage: () -> Unit,
     onUseImage: () -> Unit,
+    onScanTvContent: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
@@ -74,7 +75,14 @@ fun SettingsPanel(
                 .padding(40.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Text("Settings", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Settings", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                ToggleChip("Scan TV content", active = false) { onScanTvContent() }
+            }
 
             SectionLabel("Wallpaper")
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
