@@ -93,6 +93,10 @@ class LauncherViewModel(
 
     fun launchApp(packageName: String): Boolean = repository.launch(packageName)
 
+    fun openAppInfo(packageName: String) = repository.openAppInfo(packageName)
+
+    fun uninstallApp(packageName: String) = repository.requestUninstall(packageName)
+
     fun toggleFavorite(packageName: String) {
         viewModelScope.launch { favoritesStore.toggle(packageName) }
     }

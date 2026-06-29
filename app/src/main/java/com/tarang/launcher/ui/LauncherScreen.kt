@@ -60,6 +60,7 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.tarang.launcher.R
 import com.tarang.launcher.di.AppContainer
+import com.tarang.launcher.home.HomeSetup
 import com.tarang.launcher.viewmodel.LauncherViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -134,6 +135,16 @@ fun LauncherScreen(
     val backdrop = rememberGraphicsLayer()
     val isDark = rememberIsDark(settings.theme)
     val colors = if (isDark) DarkLauncherColors else LightLauncherColors
+
+    // "Choose Home app" is only offered when the device actually exposes a Home-app chooser (often
+    // absent on Google TV, where the redirect accessibility service is the real mechanism).
+    val chooseHomeApp: (() -> Unit)? = remember(context) {
+        if (HomeSetup.canOpenHomeSettings(context)) {
+            { HomeSetup.openHomeSettings(context) }
+        } else {
+            null
+        }
+    }
 
     // Idle screensaver: bump [interaction] on every key to restart the timer; when it elapses (only
     // while resumed, so it won't pop up behind another app) show the saver. The first key wakes it.
@@ -239,6 +250,8 @@ fun LauncherScreen(
                 onScreensaverTimeout = viewModel::setScreensaverTimeout,
                 screensaverSource = settings.screensaverSource,
                 onScreensaverSource = viewModel::setScreensaverSource,
+                onOpenAccessibilitySettings = { HomeSetup.openAccessibilitySettings(context) },
+                onChooseHomeApp = chooseHomeApp,
                 onClose = { showSettings = false },
             )
         } else {
@@ -266,6 +279,8 @@ fun LauncherScreen(
                             onFavoriteHover = { favoriteHover = it },
                             reduceMotion = settings.reduceMotion,
                             onHideApp = { viewModel.setAppHidden(it, true) },
+                            onAppInfo = { viewModel.openAppInfo(it) },
+                            onUninstall = { viewModel.uninstallApp(it) },
                             modifier = Modifier.fillMaxSize(),
                         )
                     }

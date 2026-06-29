@@ -52,6 +52,8 @@ fun AppContextMenu(
     onToggleFavorite: () -> Unit,
     onMove: () -> Unit,
     onDismiss: () -> Unit,
+    onAppInfo: () -> Unit,
+    onUninstall: () -> Unit,
     onHide: (() -> Unit)? = null,
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -89,6 +91,9 @@ fun AppContextMenu(
                         MenuRow(R.drawable.ic_visibility_off, "Hide app") { hide(); onDismiss() }
                     }
                 }
+                // App management, available for every app.
+                MenuRow(R.drawable.ic_info, "App info") { onAppInfo(); onDismiss() }
+                MenuRow(R.drawable.ic_delete, "Uninstall") { onUninstall(); onDismiss() }
             }
         }
         LaunchedEffect(Unit) { runCatching { titleFocus.requestFocus() } }

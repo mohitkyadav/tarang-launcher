@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
@@ -93,6 +95,22 @@ class AppRepository(private val context: Context) {
 
     /** The system "Watch Next" entries — used as one of the idle screensaver's artwork sources. */
     suspend fun watchNext(): List<WatchNextItem> = TvArtwork.watchNext(context)
+
+    /** Opens the system "App info" (application details) screen for [packageName]. */
+    fun openAppInfo(packageName: String) {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+            .onFailure { Log.w(TAG, "App info failed for $packageName", it) }
+    }
+
+    /** Launches the system uninstall confirmation for [packageName] (the OS gates system apps). */
+    fun requestUninstall(packageName: String) {
+        val intent = Intent(Intent.ACTION_DELETE, Uri.fromParts("package", packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+            .onFailure { Log.w(TAG, "Uninstall failed for $packageName", it) }
+    }
 
     private companion object {
         const val TAG = "AppRepository"

@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -47,6 +48,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
@@ -61,9 +65,11 @@ import com.tarang.launcher.data.ScreensaverSource
 import com.tarang.launcher.data.TV_LISTINGS_PERMISSION
 import com.tarang.launcher.data.ThemeMode
 import com.tarang.launcher.data.TvArtwork
+import com.tarang.launcher.home.HomeSetup
 
 private enum class SettingsSection(val title: String) {
     APPEARANCE("Appearance"),
+    HOME_SETUP("Home setup"),
     HIDDEN_APPS("Hidden apps"),
     DIAGNOSTICS("Diagnostics"),
 }
@@ -98,6 +104,8 @@ fun SettingsScreen(
     onScreensaverTimeout: (Int) -> Unit,
     screensaverSource: ScreensaverSource,
     onScreensaverSource: (ScreensaverSource) -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    onChooseHomeApp: (() -> Unit)?,
     onClose: () -> Unit,
 ) {
     val colors = LocalLauncherColors.current
@@ -155,6 +163,11 @@ fun SettingsScreen(
                         onScreensaverTimeout = onScreensaverTimeout,
                         screensaverSource = screensaverSource,
                         onScreensaverSource = onScreensaverSource,
+                    )
+
+                    SettingsSection.HOME_SETUP -> HomeSetupPane(
+                        onOpenAccessibility = onOpenAccessibilitySettings,
+                        onChooseHome = onChooseHomeApp,
                     )
 
                     SettingsSection.HIDDEN_APPS -> HiddenAppsPane(
@@ -455,6 +468,102 @@ private fun artworkDetail(art: AppArtwork?): String {
         if (art.posters > 0) add("${art.posters} posters")
         if (art.videos > 0) add("${art.videos} videos")
     }.joinToString("  ·  ")
+}
+
+/**
+ * Make Tarang the device's home screen: live status for the redirect accessibility service and the
+ * default-Home app, with deep-links into the relevant system settings. Status refreshes whenever the
+ * screen resumes (e.g. when returning from system settings after toggling the service).
+ */
+@Composable
+private fun HomeSetupPane(
+    onOpenAccessibility: () -> Unit,
+    onChooseHome: (() -> Unit)?,
+) {
+    val colors = LocalLauncherColors.current
+    val status = rememberHomeSetupStatus()
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
+    ) {
+        PaneTitle("Home setup")
+        Text(
+            "Make Tarang your TV's home screen. Google TV won't let an app set itself as the default " +
+                "Home, so Tarang uses an accessibility service to return here whenever the stock " +
+                "launcher appears.",
+            color = colors.textDim,
+            fontSize = 14.sp,
+            modifier = Modifier.fillMaxWidth(0.8f),
+        )
+
+        StatusRow("Home redirect service", ok = status.isRedirectEnabled, okText = "On", offText = "Off")
+        Text(
+            "Bounces back to Tarang whenever the stock launcher comes forward — the reliable way to run " +
+                "Tarang as Home here. Open Accessibility, find Tarang, and turn it on.",
+            color = colors.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.8f),
+        )
+        ToggleChip(
+            if (status.isRedirectEnabled) "Open accessibility settings" else "Enable redirect service",
+            active = false,
+        ) { onOpenAccessibility() }
+
+        StatusRow("Default Home app", ok = status.isDefaultHome, okText = "Tarang", offText = "Not set")
+        if (onChooseHome != null) {
+            ToggleChip("Choose Home app", active = false) { onChooseHome() }
+        } else {
+            Text(
+                "This device doesn't offer a Home-app chooser, so the redirect service above is what " +
+                    "keeps Tarang in front.",
+                color = colors.textDim,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth(0.8f),
+            )
+        }
+
+        Spacer(Modifier.height(44.dp))
+    }
+}
+
+@Composable
+private fun StatusRow(label: String, ok: Boolean, okText: String, offText: String) {
+    val colors = LocalLauncherColors.current
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = colors.text, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+        Text(
+            text = if (ok) okText else offText,
+            color = if (ok) okColor(colors.isDark) else warningColor(colors.isDark),
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+private data class HomeSetupStatus(val isDefaultHome: Boolean, val isRedirectEnabled: Boolean)
+
+/** Reads the home-setup status, re-reading each time the screen resumes (e.g. back from settings). */
+@Composable
+private fun rememberHomeSetupStatus(): HomeSetupStatus {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var nonce by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) nonce++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    return remember(nonce) {
+        HomeSetupStatus(
+            isDefaultHome = HomeSetup.isDefaultHome(context),
+            isRedirectEnabled = HomeSetup.isRedirectServiceEnabled(context),
+        )
+    }
 }
 
 /**

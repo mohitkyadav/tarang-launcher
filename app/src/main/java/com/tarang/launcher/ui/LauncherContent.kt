@@ -105,6 +105,8 @@ fun LauncherContent(
     onFavoriteHover: (String?) -> Unit = {},
     reduceMotion: Boolean = false,
     onHideApp: (String) -> Unit = {},
+    onAppInfo: (String) -> Unit = {},
+    onUninstall: (String) -> Unit = {},
 ) {
     val gridRows = remember(gridApps, columns) { gridApps.chunked(columns) }
     val firstCard = remember { FocusRequester() }
@@ -231,6 +233,8 @@ fun LauncherContent(
                 menuApp = null
             },
             onDismiss = { menuApp = null },
+            onAppInfo = { onAppInfo(app.packageName) },
+            onUninstall = { onUninstall(app.packageName) },
             onHide = { onHideApp(app.packageName) }, // grid-only (menu hides it for favorites)
         )
     }
