@@ -22,6 +22,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -30,15 +31,17 @@ import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
 import com.tarang.launcher.data.TileArt
 
-private val TileShape = RoundedCornerShape(24.dp)
-val TileWidth = 190.dp
-val TileHeight = 114.dp // 5:3, tvOS-style wide tile
+/** Tiles are 5:3 (tvOS-style wide). The actual size is computed from the column count. */
+const val TILE_ASPECT = 0.6f
 
 /**
  * One app tile: a wide banner-artwork tile that scales up on focus and lifts with a soft shadow
  * (no border). Apps without a banner fall back to their icon on a color. Long-press pins/unpins
  * (grid) or lifts the tile into move mode (dock). In move mode, [isMoving] lifts the tile a little
  * more and [dimmed] fades the tiles that aren't being moved.
+ *
+ * [tileWidth]/[tileHeight] are supplied by the layout so the grid fills the row at any column count;
+ * the corner radius and fallback-icon size scale with the tile so small tiles still look right.
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -48,6 +51,8 @@ fun AppCard(
     onFocused: () -> Unit,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    tileWidth: Dp,
+    tileHeight: Dp,
     modifier: Modifier = Modifier,
     upFocusRequester: FocusRequester? = null,
     isMoving: Boolean = false,
@@ -56,6 +61,7 @@ fun AppCard(
     val tile: TileArt? by produceState<TileArt?>(initialValue = null, app.packageName) {
         value = iconLoader.loadTile(app)
     }
+    val tileShape = RoundedCornerShape(tileHeight * 0.21f)
 
     var focused by remember { mutableStateOf(false) }
 
@@ -72,9 +78,9 @@ fun AppCard(
         onClick = onClick,
         onLongClick = onLongClick,
         modifier = modifier
-            .size(width = TileWidth, height = TileHeight)
+            .size(width = tileWidth, height = tileHeight)
             .alpha(if (dimmed) 0.4f else 1f)
-            .shadow(elevation = elevation, shape = TileShape, clip = false)
+            .shadow(elevation = elevation, shape = tileShape, clip = false)
             .then(
                 if (upFocusRequester != null) Modifier.focusProperties { up = upFocusRequester } else Modifier,
             )
@@ -82,7 +88,7 @@ fun AppCard(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             },
-        shape = ClickableSurfaceDefaults.shape(TileShape),
+        shape = ClickableSurfaceDefaults.shape(tileShape),
         scale = ClickableSurfaceDefaults.scale(focusedScale = if (isMoving) 1.12f else 1.1f),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color(0xFF2A2A2C),
@@ -102,7 +108,7 @@ fun AppCard(
                 contentAlignment = Alignment.Center,
             ) {
                 art.icon?.let {
-                    Image(bitmap = it, contentDescription = app.label, modifier = Modifier.size(56.dp))
+                    Image(bitmap = it, contentDescription = app.label, modifier = Modifier.size(tileHeight * 0.5f))
                 }
             }
 

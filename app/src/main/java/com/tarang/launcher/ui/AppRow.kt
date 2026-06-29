@@ -14,6 +14,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
@@ -35,6 +36,8 @@ fun AppRow(
     onAppFocused: (String) -> Unit,
     onAppClicked: (String) -> Unit,
     onAppLongPressed: (String) -> Unit,
+    tileWidth: Dp,
+    tileHeight: Dp,
     modifier: Modifier = Modifier,
     firstCardFocusRequester: FocusRequester? = null,
     upFocusRequester: FocusRequester? = null,
@@ -74,6 +77,8 @@ fun AppRow(
                 onFocused = { onAppFocused(app.packageName) },
                 onClick = { onAppClicked(app.packageName) },
                 onLongClick = { onAppLongPressed(app.packageName) },
+                tileWidth = tileWidth,
+                tileHeight = tileHeight,
                 upFocusRequester = upFocusRequester,
                 isMoving = isMoving,
                 dimmed = movingPackage != null && !isMoving,

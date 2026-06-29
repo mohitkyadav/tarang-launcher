@@ -89,5 +89,5 @@ private fun DrawScope.blob(center: Offset, radius: Float, color: Color) {
 }
 
 /** [Modifier.blur] is a no-op below API 31; gate it so we don't pretend to blur on older TVs. */
-private fun Modifier.blurCompat(radius: Dp): Modifier =
+internal fun Modifier.blurCompat(radius: Dp): Modifier =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) this.blur(radius) else this

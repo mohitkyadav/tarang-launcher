@@ -2,8 +2,8 @@ package com.tarang.launcher.ui
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,10 @@ import androidx.tv.material3.Text
 import com.tarang.launcher.R
 import com.tarang.launcher.di.AppContainer
 import com.tarang.launcher.viewmodel.LauncherViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Top-level launcher UI: an animated wallpaper behind a clean app grid, with a top bar holding the
@@ -66,6 +71,20 @@ fun LauncherScreen(
     var showSettings by remember { mutableStateOf(false) }
     val tuneFocus = remember { FocusRequester() }
 
+    // Image wallpaper: a built-in browser (no external gallery app needed) returns a Uri, which we
+    // copy into app storage and set as the wallpaper.
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showPicker by remember { mutableStateOf(false) }
+    fun applyPickedImage(uri: Uri) {
+        showPicker = false
+        scope.launch {
+            val path = withContext(Dispatchers.IO) { copyImageToInternal(context, uri) }
+            if (path != null) viewModel.setImageWallpaper(path)
+        }
+    }
+    val pickImage: () -> Unit = { showPicker = true }
+
     val focusedApp = remember(uiState.focusedPackage, uiState.allApps) {
         uiState.allApps.firstOrNull { it.packageName == uiState.focusedPackage }
     }
@@ -77,15 +96,25 @@ fun LauncherScreen(
         value = if (settings.animated) focusedApp?.let { container.iconLoader.accentColor(it) } else null
     }
     val preset = WallpaperPresets.getOrElse(settings.wallpaperId) { WallpaperPresets.first() }
+    val imagePath = settings.wallpaperImagePath
+    val showImage = settings.useImageWallpaper && imagePath != null && remember(imagePath) { File(imagePath).exists() }
 
     Box(modifier = modifier.fillMaxSize()) {
-        AnimatedWallpaper(
-            preset = preset,
-            animated = settings.animated,
-            blurred = settings.blurred,
-            ambient = ambient,
-            modifier = Modifier.fillMaxSize(),
-        )
+        if (showImage && imagePath != null) {
+            ImageWallpaper(
+                path = imagePath,
+                blurred = settings.blurred,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            AnimatedWallpaper(
+                preset = preset,
+                animated = settings.animated,
+                blurred = settings.blurred,
+                ambient = ambient,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         Column(modifier = Modifier.fillMaxSize()) {
             TopBar(onOpenSettings = { showSettings = true }, tuneFocus = tuneFocus)
@@ -101,6 +130,7 @@ fun LauncherScreen(
                         onAppClicked = { viewModel.launchApp(it) },
                         onToggleFavorite = viewModel::toggleFavorite,
                         onReorder = viewModel::setFavoritesOrder,
+                        columns = settings.columns,
                         topFocusRequester = tuneFocus,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -114,8 +144,15 @@ fun LauncherScreen(
                 onWallpaper = viewModel::setWallpaper,
                 onAnimated = viewModel::setAnimated,
                 onBlurred = viewModel::setBlurred,
+                onColumns = viewModel::setColumns,
+                onPickImage = pickImage,
+                onUseImage = { viewModel.setUseImageWallpaper(true) },
+                onDismiss = { showSettings = false },
             )
-            BackHandler { showSettings = false }
+        }
+
+        if (showPicker) {
+            ImagePickerDialog(onPick = { applyPickedImage(it) }, onDismiss = { showPicker = false })
         }
     }
 }

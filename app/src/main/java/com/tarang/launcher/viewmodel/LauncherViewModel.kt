@@ -98,6 +98,9 @@ class LauncherViewModel(
     fun setWallpaper(id: Int) = viewModelScope.launch { settingsStore.setWallpaper(id) }.let {}
     fun setAnimated(value: Boolean) = viewModelScope.launch { settingsStore.setAnimated(value) }.let {}
     fun setBlurred(value: Boolean) = viewModelScope.launch { settingsStore.setBlurred(value) }.let {}
+    fun setColumns(n: Int) = viewModelScope.launch { settingsStore.setColumns(n) }.let {}
+    fun setImageWallpaper(path: String) = viewModelScope.launch { settingsStore.setImageWallpaper(path) }.let {}
+    fun setUseImageWallpaper(value: Boolean) = viewModelScope.launch { settingsStore.setUseImageWallpaper(value) }.let {}
 
     companion object {
         private const val DEFAULT_DOCK_COUNT = 5

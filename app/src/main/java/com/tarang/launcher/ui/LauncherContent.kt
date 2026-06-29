@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -38,6 +39,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 private val DockShape = RoundedCornerShape(36.dp)
+private val SidePad = 56.dp // horizontal screen margin (matches the top bar)
+private val TileGap = 24.dp // gap between tiles in a row (matches AppRow's arrangement)
+private val DockPad = 20.dp // inner padding of the frosted dock container
 // Scrollable top space that drops the dock near the bottom (Apple-TV style). Because the bring-into-
 // view spec below won't scroll an already-visible item, the dock stays put here; it only scrolls
 // away when you move into the grid, letting the list use the full screen height without clipping.
@@ -82,10 +86,11 @@ fun LauncherContent(
     onAppClicked: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onReorder: (List<String>) -> Unit,
+    columns: Int,
     modifier: Modifier = Modifier,
     topFocusRequester: FocusRequester? = null,
 ) {
-    val gridRows = remember(gridApps) { gridApps.chunked(COLUMNS) }
+    val gridRows = remember(gridApps, columns) { gridApps.chunked(columns) }
     val firstCard = remember { FocusRequester() }
     val hasDock = dockApps.isNotEmpty()
     val listState = rememberLazyListState()
@@ -112,12 +117,21 @@ fun LauncherContent(
         movingPackage = null
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // Size tiles to fill the row at the chosen column count (the grid stretches edge-to-edge).
+        // The dock reuses the grid size, but shrinks to fit if it holds more tiles than a row.
+        val availWidth = maxWidth - SidePad * 2
+        val gridTileW = (availWidth - TileGap * (columns - 1)) / columns
+        val gridTileH = gridTileW * TILE_ASPECT
+        val dockCount = shownDock.size.coerceAtLeast(1)
+        val dockTileW = minOf(gridTileW, (availWidth - DockPad * 2 - TileGap * (dockCount - 1)) / dockCount)
+        val dockTileH = dockTileW * TILE_ASPECT
+
         CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalBringIntoView) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 56.dp, end = 56.dp, top = DockTopGap, bottom = 56.dp),
+            contentPadding = PaddingValues(start = SidePad, end = SidePad, top = DockTopGap, bottom = 56.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
             if (hasDock) {
@@ -131,7 +145,7 @@ fun LauncherContent(
                             .clip(DockShape)
                             .background(Color.White.copy(alpha = 0.06f))
                             .border(1.dp, Color.White.copy(alpha = 0.08f), DockShape)
-                            .padding(20.dp),
+                            .padding(DockPad),
                     ) {
                         AppRow(
                             apps = shownDock,
@@ -139,6 +153,8 @@ fun LauncherContent(
                             onAppFocused = onAppFocused,
                             onAppClicked = onAppClicked,
                             onAppLongPressed = { movingPackage = it }, // lift into move mode
+                            tileWidth = dockTileW,
+                            tileHeight = dockTileH,
                             firstCardFocusRequester = firstCard,
                             upFocusRequester = topFocusRequester,
                             movingPackage = movingPackage,
@@ -156,6 +172,8 @@ fun LauncherContent(
                     onAppFocused = onAppFocused,
                     onAppClicked = onAppClicked,
                     onAppLongPressed = onToggleFavorite, // long-press a grid tile to pin it
+                    tileWidth = gridTileW,
+                    tileHeight = gridTileH,
                     firstCardFocusRequester = if (!hasDock && index == 0) firstCard else null,
                     // Only the very top row sends UP to the settings button.
                     upFocusRequester = if (!hasDock && index == 0) topFocusRequester else null,
@@ -190,5 +208,3 @@ private fun MoveHint(modifier: Modifier = Modifier) {
         )
     }
 }
-
-private const val COLUMNS = 4

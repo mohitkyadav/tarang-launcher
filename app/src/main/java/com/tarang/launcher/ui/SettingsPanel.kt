@@ -1,5 +1,6 @@
 package com.tarang.launcher.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,18 +22,24 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.tarang.launcher.data.LauncherSettings
+import com.tarang.launcher.data.MAX_COLUMNS
+import com.tarang.launcher.data.MIN_COLUMNS
 
 /**
- * The in-app settings overlay: wallpaper preset, motion (animated/static) and background
- * (blurred/sharp). Close with Back (handled by the caller).
+ * The in-app settings overlay: wallpaper (gradient presets or a chosen photo), tiles-per-row,
+ * motion (animated/static) and background (blurred/sharp). Rendered in a [Dialog] so it's a true
+ * modal — D-pad focus stays inside it (no leaking to the grid behind) and Back closes it.
  */
 @Composable
 fun SettingsPanel(
@@ -40,12 +47,21 @@ fun SettingsPanel(
     onWallpaper: (Int) -> Unit,
     onAnimated: (Boolean) -> Unit,
     onBlurred: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
+    onColumns: (Int) -> Unit,
+    onPickImage: () -> Unit,
+    onUseImage: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
+    val thumb = rememberWallpaperThumb(settings.wallpaperImagePath)
+    val imageActive = settings.useImageWallpaper
 
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
     Box(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.65f)),
         contentAlignment = Alignment.Center,
@@ -56,19 +72,37 @@ fun SettingsPanel(
                 .clip(RoundedCornerShape(28.dp))
                 .background(Color(0xFF141417))
                 .padding(40.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Text("Settings", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
 
             SectionLabel("Wallpaper")
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 WallpaperPresets.forEachIndexed { i, preset ->
                     PresetSwatch(
                         preset = preset,
-                        selected = i == settings.wallpaperId,
+                        selected = !imageActive && i == settings.wallpaperId,
                         onClick = { onWallpaper(i) },
                         modifier = if (i == 0) Modifier.focusRequester(firstFocus) else Modifier,
                     )
+                }
+                PhotoSwatch(
+                    thumb = thumb,
+                    selected = imageActive,
+                    onClick = {
+                        when {
+                            settings.wallpaperImagePath == null -> onPickImage() // none yet: pick
+                            !imageActive -> onUseImage() // have one but inactive: just re-activate
+                            else -> onPickImage() // already active: replace
+                        }
+                    },
+                )
+            }
+
+            SectionLabel("Tiles per row")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                for (n in MIN_COLUMNS..MAX_COLUMNS) {
+                    ToggleChip("$n", n == settings.columns) { onColumns(n) }
                 }
             }
 
@@ -89,6 +123,7 @@ fun SettingsPanel(
     }
 
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+    }
 }
 
 @Composable
@@ -106,7 +141,7 @@ private fun PresetSwatch(
 ) {
     Surface(
         onClick = onClick,
-        modifier = modifier.size(width = 84.dp, height = 50.dp),
+        modifier = modifier.size(width = 72.dp, height = 44.dp),
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f),
         colors = ClickableSurfaceDefaults.colors(containerColor = preset.base, focusedContainerColor = preset.base),
@@ -116,15 +151,59 @@ private fun PresetSwatch(
                 .fillMaxSize()
                 .background(Brush.linearGradient(listOf(preset.blobA, preset.blobB, preset.blobC))),
         ) {
-            if (selected) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .border(3.dp, Color.White, RoundedCornerShape(14.dp)),
-                )
-            }
+            if (selected) SelectedRing()
         }
     }
+}
+
+/** The "use a photo" swatch: shows the chosen image's thumbnail, or a placeholder when none is set. */
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun PhotoSwatch(
+    thumb: androidx.compose.ui.graphics.ImageBitmap?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.size(width = 72.dp, height = 44.dp),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color(0xFF2A2A2E),
+            focusedContainerColor = Color(0xFF3A3A40),
+        ),
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (thumb != null) {
+                Image(
+                    bitmap = thumb,
+                    contentDescription = "Photo wallpaper",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Text(
+                    "＋ Photo",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            if (selected) SelectedRing()
+        }
+    }
+}
+
+@Composable
+private fun SelectedRing() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .border(3.dp, Color.White, RoundedCornerShape(14.dp)),
+    )
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class)

@@ -11,6 +11,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- Browse the device's photos for the optional image wallpaper (runtime-granted). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <!-- TV app: no touchscreen; leanback optional so it still runs on phone/emulator. -->
     <uses-feature
         android:name="android.software.leanback"
