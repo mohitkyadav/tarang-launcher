@@ -24,13 +24,9 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -58,7 +54,7 @@ fun AppCard(
     app: AppInfo,
     iconLoader: IconLoader,
     onFocused: () -> Unit,
-    onClick: (sourceBounds: Rect) -> Unit,
+    onClick: () -> Unit,
     onLongClick: () -> Unit,
     tileWidth: Dp,
     tileHeight: Dp,
@@ -74,8 +70,6 @@ fun AppCard(
     val tileShape = RoundedCornerShape(tileHeight * 0.21f)
 
     var focused by remember { mutableStateOf(false) }
-    // Tracked so a click can report the tile's on-screen rect (origin for the app-launch animation).
-    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     val elevation by animateDpAsState(
         targetValue = when {
@@ -100,11 +94,10 @@ fun AppCard(
     )
 
     Surface(
-        onClick = { onClick(coords?.boundsInWindow() ?: Rect.Zero) },
+        onClick = onClick,
         onLongClick = onLongClick,
         modifier = modifier
             .size(width = tileWidth, height = tileHeight)
-            .onGloballyPositioned { coords = it }
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .alpha(if (dimmed) 0.4f else 1f)
             .shadow(elevation = elevation, shape = tileShape, clip = false)

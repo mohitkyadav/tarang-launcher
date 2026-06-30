@@ -1,13 +1,11 @@
 package com.tarang.launcher.ui
 
-import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -43,8 +41,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.TransformOrigin
@@ -56,7 +52,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -78,7 +73,6 @@ import com.tarang.launcher.data.LauncherSettings
 import com.tarang.launcher.di.AppContainer
 import com.tarang.launcher.home.HomeSetup
 import com.tarang.launcher.viewmodel.LauncherViewModel
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -215,12 +209,10 @@ fun LauncherScreen(
     val artDrift = frameSettled && settings.frameMotion && !settings.reduceMotion
     val artCycle = frameSettled
 
-    // App launch / return choreography. Launching hands the system a scale-up rooted at the tapped
-    // tile (so the app window grows out of it); coming back home eases the grid in from that same
-    // spot. Both are skipped when Reduce motion is on.
-    val view = LocalView.current
-    val enter = remember { Animatable(1f) } // 1 = home settled; 0 = zoomed-in "inside an app"
-    var launchOrigin by remember { mutableStateOf(Offset(0.5f, 0.5f)) } // fractional transform origin
+    // App launch / return choreography. The system still grows the app window out of the tapped tile;
+    // the launcher chrome itself uses the same dock-drop / bar-rise motion as entering Frame Art (see
+    // the per-element transforms below), then reverses on return. Skipped when Reduce motion is on.
+    val enter = remember { Animatable(1f) } // 1 = home settled; 0 = launched (chrome gone)
     var awaitingReturn by remember { mutableStateOf(false) }
     var returnTick by remember { mutableIntStateOf(0) }
     var launchTick by remember { mutableIntStateOf(0) }
@@ -228,27 +220,11 @@ fun LauncherScreen(
     // the per-frame wallpaper capture so the animation itself stays smooth on weak TV hardware.
     val transitioning by remember { derivedStateOf { enter.value < 0.999f } }
 
-    fun launchApp(packageName: String, source: Rect) {
-        val animate = !settings.reduceMotion
-        val options = if (animate && source.width > 0f && source.height > 0f) {
-            if (view.width > 0 && view.height > 0) {
-                launchOrigin = Offset(
-                    (source.center.x / view.width).coerceIn(0f, 1f),
-                    (source.center.y / view.height).coerceIn(0f, 1f),
-                )
-            }
-            ActivityOptions.makeScaleUpAnimation(
-                view,
-                source.left.roundToInt(),
-                source.top.roundToInt(),
-                source.width.roundToInt(),
-                source.height.roundToInt(),
-            ).toBundle()
-        } else {
-            null
-        }
-        val launched = viewModel.launchApp(packageName, options)
-        if (launched && animate) {
+    fun launchApp(packageName: String) {
+        // No window scale-up — the app opens with the system default while the launcher chrome does the
+        // dock-drop / bar-rise dissolve (the same motion as entering Frame Art).
+        val launched = viewModel.launchApp(packageName, null)
+        if (launched && !settings.reduceMotion) {
             awaitingReturn = true
             launchTick++
         }
@@ -267,10 +243,9 @@ fun LauncherScreen(
     }
     LaunchedEffect(launchTick) {
         if (launchTick > 0) {
-            // Plays during the device's app-open latency so the click gets immediate feedback: the
-            // home zooms toward the tile and fades as the app takes over. Kept short to match the
-            // system's (fast) tile scale-up so the two read as one motion.
-            enter.animateTo(0f, tween(durationMillis = 240, easing = FastOutLinearInEasing))
+            // Plays during the device's app-open latency: the chrome does the same dock-drop / bar-rise
+            // as entering Frame Art (just quicker, so the app still opens promptly).
+            enter.animateTo(0f, tween(durationMillis = 450, easing = FastOutSlowInEasing))
         }
     }
     LaunchedEffect(returnTick) {
@@ -427,23 +402,12 @@ fun LauncherScreen(
                     onClose = { showSettings = false },
                 )
             } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            // Launch/return zoom (app open) — independent of the frame transition below.
-                            val p = enter.value
-                            alpha = p
-                            val s = 1f + (1f - p) * 0.16f
-                            scaleX = s
-                            scaleY = s
-                            transformOrigin = TransformOrigin(launchOrigin.x, launchOrigin.y)
-                        },
-                ) {
-                    // Top bar rises up and off the top as frame mode takes over.
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Top bar rises up and off the top — driven by BOTH the frame transition and an app
+                    // launch (1 - enter.value), so launching an app uses the same chrome choreography.
                     Box(
                         modifier = Modifier.fillMaxWidth().graphicsLayer {
-                            val p = frameProgress.value
+                            val p = maxOf(frameProgress.value, 1f - enter.value)
                             translationY = -p * (size.height + 48f)
                             alpha = 1f - (p * 1.7f).coerceAtMost(1f)
                         },
@@ -456,13 +420,14 @@ fun LauncherScreen(
                             glassLive = !transitioning && !frameMoving,
                         )
                     }
-                    // Dock + grid scale up and drop off the bottom as frame mode takes over.
+                    // Dock + grid scale up and drop off the bottom — same choreography for frame mode and
+                    // for app launch (so the two share one motion language).
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
                             .graphicsLayer {
-                                val p = frameProgress.value
+                                val p = maxOf(frameProgress.value, 1f - enter.value)
                                 val s = 1f + 0.28f * p
                                 scaleX = s
                                 scaleY = s
@@ -479,7 +444,7 @@ fun LauncherScreen(
                                 gridApps = visibleGrid,
                                 iconLoader = container.iconLoader,
                                 onAppFocused = viewModel::onAppFocused,
-                                onAppClicked = { pkg, sourceBounds -> launchApp(pkg, sourceBounds) },
+                                onAppClicked = { pkg -> launchApp(pkg) },
                                 onToggleFavorite = viewModel::toggleFavorite,
                                 onReorder = viewModel::setFavoritesOrder,
                                 columns = settings.columns,
