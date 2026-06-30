@@ -1,6 +1,5 @@
 package com.tarang.launcher.ui
 
-import android.text.format.DateFormat
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -9,7 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -20,13 +18,12 @@ import java.util.Locale
 
 /**
  * A quiet time + date readout for the top bar. Updates once a minute (it ticks on the minute
- * boundary, not every second, so it costs almost nothing). Honors the device's 12/24h setting.
+ * boundary, not every second, so it costs almost nothing). Always 24-hour, regardless of the
+ * device's 12/24h setting (no in-app option for now).
  */
 @Composable
 fun Clock(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val use24h = remember { DateFormat.is24HourFormat(context) }
-    val timeFormat = remember(use24h) { SimpleDateFormat(if (use24h) "HH:mm" else "h:mm", Locale.getDefault()) }
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dateFormat = remember { SimpleDateFormat("EEE, d MMM", Locale.getDefault()) }
 
     var now by remember { mutableStateOf(Date(System.currentTimeMillis())) }

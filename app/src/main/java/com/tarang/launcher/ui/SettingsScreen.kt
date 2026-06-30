@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -57,11 +59,14 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.tarang.launcher.data.AppArtwork
 import com.tarang.launcher.data.AppInfo
+import com.tarang.launcher.data.FRAME_AUTOSTART_TIMEOUTS
+import com.tarang.launcher.data.FRAME_INTERVALS
+import com.tarang.launcher.data.FrameClockPosition
+import com.tarang.launcher.data.FrameClockSize
+import com.tarang.launcher.data.FrameSource
 import com.tarang.launcher.data.LauncherSettings
 import com.tarang.launcher.data.MAX_COLUMNS
 import com.tarang.launcher.data.MIN_COLUMNS
-import com.tarang.launcher.data.SCREENSAVER_TIMEOUTS
-import com.tarang.launcher.data.ScreensaverSource
 import com.tarang.launcher.data.TV_LISTINGS_PERMISSION
 import com.tarang.launcher.data.ThemeMode
 import com.tarang.launcher.data.TvArtwork
@@ -69,6 +74,7 @@ import com.tarang.launcher.home.HomeSetup
 
 private enum class SettingsSection(val title: String) {
     APPEARANCE("Appearance"),
+    FRAME_ART("Frame Art"),
     HOME_SETUP("Home setup"),
     HIDDEN_APPS("Hidden apps"),
     DIAGNOSTICS("Diagnostics"),
@@ -100,10 +106,17 @@ fun SettingsScreen(
     onReduceMotion: (Boolean) -> Unit,
     hiddenApps: List<AppInfo>,
     onUnhideApp: (String) -> Unit,
-    screensaverTimeoutSec: Int,
-    onScreensaverTimeout: (Int) -> Unit,
-    screensaverSource: ScreensaverSource,
-    onScreensaverSource: (ScreensaverSource) -> Unit,
+    onFrameSource: (FrameSource) -> Unit,
+    onPickFrameFolder: () -> Unit,
+    onPickFramePhoto: () -> Unit,
+    onFrameInterval: (Int) -> Unit,
+    onFrameAutoStart: (Int) -> Unit,
+    onFrameClock: (Boolean) -> Unit,
+    onFrameClockPosition: (FrameClockPosition) -> Unit,
+    onFrameClockSize: (FrameClockSize) -> Unit,
+    onFrameShowDate: (Boolean) -> Unit,
+    onFrameMotion: (Boolean) -> Unit,
+    onFrameShuffle: (Boolean) -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onChooseHomeApp: (() -> Unit)?,
     onClose: () -> Unit,
@@ -159,10 +172,31 @@ fun SettingsScreen(
                         onTheme = onTheme,
                         reduceMotion = reduceMotion,
                         onReduceMotion = onReduceMotion,
-                        screensaverTimeoutSec = screensaverTimeoutSec,
-                        onScreensaverTimeout = onScreensaverTimeout,
-                        screensaverSource = screensaverSource,
-                        onScreensaverSource = onScreensaverSource,
+                    )
+
+                    SettingsSection.FRAME_ART -> FrameArtPane(
+                        frameSource = settings.frameSource,
+                        onFrameSource = onFrameSource,
+                        folderName = settings.frameFolderName,
+                        onPickFolder = onPickFrameFolder,
+                        imagePath = settings.frameImagePath,
+                        onPickPhoto = onPickFramePhoto,
+                        intervalSec = settings.frameIntervalSec,
+                        onInterval = onFrameInterval,
+                        autoStartSec = settings.frameAutoStartSec,
+                        onAutoStart = onFrameAutoStart,
+                        clock = settings.frameClock,
+                        onClock = onFrameClock,
+                        clockPosition = settings.frameClockPosition,
+                        onClockPosition = onFrameClockPosition,
+                        clockSize = settings.frameClockSize,
+                        onClockSize = onFrameClockSize,
+                        showDate = settings.frameShowDate,
+                        onShowDate = onFrameShowDate,
+                        motion = settings.frameMotion,
+                        onMotion = onFrameMotion,
+                        shuffle = settings.frameShuffle,
+                        onShuffle = onFrameShuffle,
                     )
 
                     SettingsSection.HOME_SETUP -> HomeSetupPane(
@@ -239,10 +273,6 @@ private fun AppearancePane(
     onTheme: (ThemeMode) -> Unit,
     reduceMotion: Boolean,
     onReduceMotion: (Boolean) -> Unit,
-    screensaverTimeoutSec: Int,
-    onScreensaverTimeout: (Int) -> Unit,
-    screensaverSource: ScreensaverSource,
-    onScreensaverSource: (ScreensaverSource) -> Unit,
 ) {
     val thumb = rememberWallpaperThumb(settings.wallpaperImagePath)
     val imageActive = settings.useImageWallpaper
@@ -323,31 +353,195 @@ private fun AppearancePane(
             ToggleChip("Sharp", !settings.blurred) { onBlurred(false) }
         }
 
-        SectionLabel("Screensaver")
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SCREENSAVER_TIMEOUTS.forEach { sec ->
-                ToggleChip(timeoutLabel(sec), sec == screensaverTimeoutSec) { onScreensaverTimeout(sec) }
-            }
+        // Breathing room so the last section can scroll clear of the screen edge.
+        Spacer(Modifier.height(44.dp))
+    }
+}
+
+/**
+ * Frame Art: turn the TV into a framed picture (chrome-free full screen). Choose what it shows — the
+ * current wallpaper, a slideshow of a device folder, or a single photo — the slideshow interval, and
+ * an optional idle auto-start. It's triggered from the frame button in the top bar; any key exits.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FrameArtPane(
+    frameSource: FrameSource,
+    onFrameSource: (FrameSource) -> Unit,
+    folderName: String?,
+    onPickFolder: () -> Unit,
+    imagePath: String?,
+    onPickPhoto: () -> Unit,
+    intervalSec: Int,
+    onInterval: (Int) -> Unit,
+    autoStartSec: Int,
+    onAutoStart: (Int) -> Unit,
+    clock: Boolean,
+    onClock: (Boolean) -> Unit,
+    clockPosition: FrameClockPosition,
+    onClockPosition: (FrameClockPosition) -> Unit,
+    clockSize: FrameClockSize,
+    onClockSize: (FrameClockSize) -> Unit,
+    showDate: Boolean,
+    onShowDate: (Boolean) -> Unit,
+    motion: Boolean,
+    onMotion: (Boolean) -> Unit,
+    shuffle: Boolean,
+    onShuffle: (Boolean) -> Unit,
+) {
+    val colors = LocalLauncherColors.current
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
+    ) {
+        PaneTitle("Frame Art")
+        Text(
+            "Turn the TV into a framed picture. Press the frame button in the top bar (or wait for the " +
+                "auto-start delay), then press any key to come back.",
+            color = colors.textDim,
+            fontSize = 14.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
+        SectionLabel("Show")
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            ToggleChip("Current wallpaper", frameSource == FrameSource.WALLPAPER) { onFrameSource(FrameSource.WALLPAPER) }
+            ToggleChip("Folder", frameSource == FrameSource.FOLDER) { onFrameSource(FrameSource.FOLDER) }
+            ToggleChip("Single photo", frameSource == FrameSource.SINGLE) { onFrameSource(FrameSource.SINGLE) }
         }
-        if (screensaverTimeoutSec > 0) {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ToggleChip("Artwork", screensaverSource == ScreensaverSource.ARTWORK) {
-                    onScreensaverSource(ScreensaverSource.ARTWORK)
-                }
-                ToggleChip("Clock", screensaverSource == ScreensaverSource.CLOCK) {
-                    onScreensaverSource(ScreensaverSource.CLOCK)
-                }
-            }
-            Text(
-                "After this long with no input, show a slideshow of your apps' artwork (or just a " +
-                    "clock) until you press a button.",
-                color = LocalLauncherColors.current.textDim,
+
+        when (frameSource) {
+            FrameSource.WALLPAPER -> Text(
+                "Shows whatever wallpaper you've set, with no clock or app grid.",
+                color = colors.textDim,
                 fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth(0.85f),
             )
+
+            FrameSource.FOLDER -> {
+                SectionLabel("Folder")
+                ToggleChip(folderName ?: "Choose folder", active = false) { onPickFolder() }
+
+                SectionLabel("Switch every")
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FRAME_INTERVALS.forEach { sec ->
+                        ToggleChip(intervalLabel(sec), sec == intervalSec) { onInterval(sec) }
+                    }
+                }
+                Text(
+                    "Cross-fades through the photos in this folder.",
+                    color = colors.textDim,
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                )
+
+                SectionLabel("Shuffle")
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    ToggleChip("On", shuffle) { onShuffle(true) }
+                    ToggleChip("Off", !shuffle) { onShuffle(false) }
+                }
+                Text(
+                    "On: a fresh random order each time Frame Art starts. Off: newest photos first.",
+                    color = colors.textDim,
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                )
+            }
+
+            FrameSource.SINGLE -> {
+                SectionLabel("Photo")
+                PhotoSwatch(
+                    thumb = rememberWallpaperThumb(imagePath),
+                    selected = imagePath != null,
+                    onClick = onPickPhoto,
+                )
+                Text(
+                    "Choose a single photo to display.",
+                    color = colors.textDim,
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                )
+            }
         }
 
-        // Breathing room so the last section can scroll clear of the screen edge.
+        SectionLabel("Motion")
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToggleChip("On", motion) { onMotion(true) }
+            ToggleChip("Off", !motion) { onMotion(false) }
+        }
+        Text(
+            "A very slow, smooth drift across the picture — a living painting. Off keeps it perfectly still.",
+            color = colors.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
+        SectionLabel("Clock")
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToggleChip("On", clock) { onClock(true) }
+            ToggleChip("Off", !clock) { onClock(false) }
+        }
+        Text(
+            "Shows an elegant time in the corner, floating above the art. Off is a pure picture.",
+            color = colors.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
+        if (clock) {
+            SectionLabel("Clock position")
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ToggleChip("Bottom left", clockPosition == FrameClockPosition.BOTTOM_LEFT) {
+                    onClockPosition(FrameClockPosition.BOTTOM_LEFT)
+                }
+                ToggleChip("Bottom centre", clockPosition == FrameClockPosition.BOTTOM_CENTER) {
+                    onClockPosition(FrameClockPosition.BOTTOM_CENTER)
+                }
+                ToggleChip("Bottom right", clockPosition == FrameClockPosition.BOTTOM_RIGHT) {
+                    onClockPosition(FrameClockPosition.BOTTOM_RIGHT)
+                }
+                ToggleChip("Centre", clockPosition == FrameClockPosition.CENTER) {
+                    onClockPosition(FrameClockPosition.CENTER)
+                }
+            }
+
+            SectionLabel("Clock size")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ToggleChip("Small", clockSize == FrameClockSize.SMALL) { onClockSize(FrameClockSize.SMALL) }
+                ToggleChip("Medium", clockSize == FrameClockSize.MEDIUM) { onClockSize(FrameClockSize.MEDIUM) }
+                ToggleChip("Large", clockSize == FrameClockSize.LARGE) { onClockSize(FrameClockSize.LARGE) }
+            }
+
+            SectionLabel("Date")
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                ToggleChip("Show", showDate) { onShowDate(true) }
+                ToggleChip("Hide", !showDate) { onShowDate(false) }
+            }
+        }
+
+        SectionLabel("Auto-start")
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FRAME_AUTOSTART_TIMEOUTS.forEach { sec ->
+                ToggleChip(timeoutLabel(sec), sec == autoStartSec) { onAutoStart(sec) }
+            }
+        }
+        Text(
+            if (autoStartSec <= 0) {
+                "Frame Art starts only when you press the frame button."
+            } else {
+                "Frame Art also starts on its own after this long with no input."
+            },
+            color = colors.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
         Spacer(Modifier.height(44.dp))
     }
 }
@@ -758,20 +952,28 @@ private fun BoxScope.SelectedBadge() {
 private fun ToggleChip(label: String, active: Boolean, onClick: () -> Unit) {
     val colors = LocalLauncherColors.current
     var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(percent = 50)
+    // Focus and selection must read differently (the old code filled both with the accent, so you
+    // couldn't tell where focus was): focus = solid accent fill + scale; the selected-but-unfocused
+    // value is shown by an accent outline instead, so only the focused chip is ever filled.
+    val selectedOutline = if (active && !focused) Modifier.border(2.dp, colors.highlight, shape) else Modifier
     Surface(
         onClick = onClick,
-        modifier = Modifier.onFocusChanged { focused = it.isFocused },
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(percent = 50)),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
+        modifier = Modifier.onFocusChanged { focused = it.isFocused }.then(selectedOutline),
+        shape = ClickableSurfaceDefaults.shape(shape),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.06f),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (active) colors.highlight else colors.chip,
+            containerColor = colors.chip,
             focusedContainerColor = colors.highlight,
         ),
     ) {
         Text(
             text = label,
-            color = if (active || focused) colors.onHighlight else colors.text,
+            color = if (focused) colors.onHighlight else colors.text,
             fontSize = 15.sp,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
         )
     }
@@ -782,6 +984,8 @@ private fun timeoutLabel(sec: Int) = when {
     sec < 60 -> "${sec}s"
     else -> "${sec / 60} min"
 }
+
+private fun intervalLabel(sec: Int) = if (sec < 60) "${sec}s" else "${sec / 60} min"
 
 private fun warningColor(isDark: Boolean) = if (isDark) Color(0xFFFFE082) else Color(0xFF8A6D00)
 private fun okColor(isDark: Boolean) = if (isDark) Color(0xFF80E27E) else Color(0xFF1B8A3A)

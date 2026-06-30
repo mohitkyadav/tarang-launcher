@@ -73,6 +73,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.tarang.launcher.R
+import com.tarang.launcher.data.FrameSource
 import com.tarang.launcher.di.AppContainer
 import com.tarang.launcher.home.HomeSetup
 import com.tarang.launcher.viewmodel.LauncherViewModel
@@ -108,14 +109,23 @@ fun LauncherScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showPicker by remember { mutableStateOf(false) }
+    var pickerForFrame by remember { mutableStateOf(false) } // the photo picker is shared: wallpaper vs. frame photo
+    var showFolderPicker by remember { mutableStateOf(false) }
     fun applyPickedImage(uri: Uri) {
+        val forFrame = pickerForFrame
         showPicker = false
         scope.launch {
-            val path = withContext(Dispatchers.IO) { copyImageToInternal(context, uri) }
-            if (path != null) viewModel.setImageWallpaper(path)
+            val path = withContext(Dispatchers.IO) {
+                copyImageToInternal(context, uri, subdir = if (forFrame) "frame" else "wallpaper")
+            }
+            if (path != null) {
+                if (forFrame) viewModel.setFrameImage(path) else viewModel.setImageWallpaper(path)
+            }
         }
     }
-    val pickImage: () -> Unit = { showPicker = true }
+    val pickImage: () -> Unit = { pickerForFrame = false; showPicker = true }
+    val pickFramePhoto: () -> Unit = { pickerForFrame = true; showPicker = true }
+    val pickFrameFolder: () -> Unit = { showFolderPicker = true }
     var showTvProbe by remember { mutableStateOf(false) }
 
     val focusedPkg by viewModel.focusedPackage.collectAsStateWithLifecycle()
@@ -140,7 +150,10 @@ fun LauncherScreen(
     // While hovering an opted-in favorite, its app artwork plays as the wallpaper; clears (back to the
     // selected wallpaper) when focus leaves the dock. Not while the settings page is up.
     var favoriteHover by remember { mutableStateOf<String?>(null) }
-    val artworkApp = if (!showSettings) {
+    // Frame Art ("painting") mode. Declared here so the wallpaper selection below falls back to the
+    // base wallpaper while it's on (no hover artwork bleeding into the frame).
+    var frameOn by remember { mutableStateOf(false) }
+    val artworkApp = if (!showSettings && !frameOn) {
         favoriteHover?.takeIf { settings.useAppArtwork && it in settings.artworkApps }
     } else {
         null
@@ -161,18 +174,17 @@ fun LauncherScreen(
         }
     }
 
-    // Idle screensaver: bump [interaction] on every key to restart the timer; when it elapses (only
-    // while resumed, so it won't pop up behind another app) show the saver. The first key wakes it.
+    // Frame Art auto-start: bump [interaction] on every key to restart the idle timer; when it elapses
+    // (only while resumed, so it won't kick in behind another app) enter Frame Art. The next key exits.
     val lifecycleOwner = LocalLifecycleOwner.current
     var interaction by remember { mutableIntStateOf(0) }
-    var screensaverOn by remember { mutableStateOf(false) }
     var wakingUp by remember { mutableStateOf(false) }
-    val idleMs = settings.screensaverTimeoutSec * 1000L
-    LaunchedEffect(interaction, idleMs, lifecycleOwner) {
-        if (idleMs <= 0L) return@LaunchedEffect
+    val autoStartMs = settings.frameAutoStartSec * 1000L
+    LaunchedEffect(interaction, autoStartMs, lifecycleOwner) {
+        if (autoStartMs <= 0L) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            kotlinx.coroutines.delay(idleMs)
-            screensaverOn = true
+            kotlinx.coroutines.delay(autoStartMs)
+            frameOn = true
         }
     }
 
@@ -252,16 +264,16 @@ fun LauncherScreen(
             .fillMaxSize()
             .onPreviewKeyEvent { e ->
                 when {
-                    // Screensaver is up: the first key wakes it and is swallowed (whole press).
-                    screensaverOn -> {
+                    // Frame Art is up: the first key exits it and is swallowed (whole press).
+                    frameOn -> {
                         if (e.type == KeyEventType.KeyDown) {
-                            screensaverOn = false
+                            frameOn = false
                             wakingUp = true
                             interaction++
                         }
                         true
                     }
-                    // Swallow the key-up of the press that dismissed the saver (no stray click/launch).
+                    // Swallow the key-up of the press that exited the frame (no stray click/launch).
                     wakingUp -> {
                         if (e.type == KeyEventType.KeyUp) wakingUp = false
                         true
@@ -277,9 +289,9 @@ fun LauncherScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .drawWithContent {
-                    // While a launch/return zoom runs, no frosted surface is sampling the backdrop, so
-                    // skip the per-frame layer capture and draw the wallpaper straight to the screen.
-                    if (transitioning) {
+                    // No frosted surface samples the backdrop during a launch zoom or in Frame Art, so
+                    // skip the per-frame layer capture and draw straight to the screen.
+                    if (transitioning || frameOn) {
                         drawContent()
                     } else {
                         backdrop.record { this@drawWithContent.drawContent() }
@@ -287,108 +299,154 @@ fun LauncherScreen(
                     }
                 },
         ) {
-            Crossfade(targetState = artworkApp, animationSpec = tween(700), label = "wallpaper") { app ->
-                when {
-                    app != null -> AppArtworkWallpaper(
-                        packageName = app,
-                        blurred = settings.blurred,
-                        isDark = isDark,
-                        reduceMotion = settings.reduceMotion,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-
-                    showImage && imagePath != null -> ImageWallpaper(
-                        path = imagePath,
-                        blurred = settings.blurred,
-                        isDark = isDark,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-
-                    else -> AnimatedWallpaper(
-                        preset = preset,
-                        animated = settings.animated && !settings.reduceMotion,
-                        blurred = settings.blurred,
-                        ambient = ambient,
+            // Frame Art's folder/single sources replace the wallpaper entirely; the WALLPAPER source
+            // (and any unconfigured frame) falls through to the normal wallpaper below.
+            val frameSingle = frameOn && settings.frameSource == FrameSource.SINGLE && settings.frameImagePath != null
+            val frameFolder = frameOn && settings.frameSource == FrameSource.FOLDER && settings.frameFolderId != null
+            val frameMotion = settings.frameMotion && !settings.reduceMotion
+            when {
+                frameSingle -> Box(modifier = Modifier.fillMaxSize().frameParallax(frameMotion)) {
+                    ImageWallpaper(
+                        path = settings.frameImagePath!!,
+                        blurred = false,
                         isDark = isDark,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
+
+                frameFolder -> FrameSlideshow(
+                    folderId = settings.frameFolderId!!,
+                    intervalSec = settings.frameIntervalSec,
+                    motion = frameMotion,
+                    shuffle = settings.frameShuffle,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                else -> Crossfade(targetState = artworkApp, animationSpec = tween(700), label = "wallpaper") { app ->
+                    when {
+                        app != null -> AppArtworkWallpaper(
+                            packageName = app,
+                            blurred = settings.blurred,
+                            isDark = isDark,
+                            reduceMotion = settings.reduceMotion,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+
+                        showImage && imagePath != null -> ImageWallpaper(
+                            path = imagePath,
+                            blurred = settings.blurred,
+                            isDark = isDark,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+
+                        else -> AnimatedWallpaper(
+                            preset = preset,
+                            animated = settings.animated && !settings.reduceMotion,
+                            blurred = settings.blurred,
+                            ambient = ambient,
+                            isDark = isDark,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
             }
         }
 
-        // The settings page takes over the whole screen (not a modal), so D-pad focus can't reach
-        // the launcher behind it; the launcher isn't composed while settings is open.
-        if (showSettings) {
-            SettingsScreen(
-                settings = settings,
-                onWallpaper = viewModel::setWallpaper,
-                onAnimated = viewModel::setAnimated,
-                onBlurred = viewModel::setBlurred,
-                onColumns = viewModel::setColumns,
-                onPickImage = pickImage,
-                onUseImage = { viewModel.setUseImageWallpaper(true) },
-                onScanTvContent = { showTvProbe = true },
-                favoriteApps = uiState.dockApps,
-                onUseAppArtwork = viewModel::setUseAppArtwork,
-                onToggleArtworkApp = viewModel::setArtworkApp,
-                theme = settings.theme,
-                onTheme = viewModel::setTheme,
-                reduceMotion = settings.reduceMotion,
-                onReduceMotion = viewModel::setReduceMotion,
-                hiddenApps = uiState.allApps.filter { it.packageName in settings.hiddenApps },
-                onUnhideApp = { viewModel.setAppHidden(it, false) },
-                screensaverTimeoutSec = settings.screensaverTimeoutSec,
-                onScreensaverTimeout = viewModel::setScreensaverTimeout,
-                screensaverSource = settings.screensaverSource,
-                onScreensaverSource = viewModel::setScreensaverSource,
-                onOpenAccessibilitySettings = { HomeSetup.openAccessibilitySettings(context) },
-                onChooseHomeApp = chooseHomeApp,
-                onClose = { showSettings = false },
+        // Optional Frame Art clock, drawn over the picture (never in normal launcher mode).
+        if (frameOn && settings.frameClock) {
+            FrameClock(
+                position = settings.frameClockPosition,
+                size = settings.frameClockSize,
+                showDate = settings.frameShowDate,
+                modifier = Modifier.fillMaxSize(),
             )
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        // p: 1 = settled, <1 = mid launch/return. Home zooms toward the launched tile
-                        // on the way out and scales back DOWN to rest (with a fade) on return.
-                        val p = enter.value
-                        alpha = p
-                        val s = 1f + (1f - p) * 0.16f
-                        scaleX = s
-                        scaleY = s
-                        transformOrigin = TransformOrigin(launchOrigin.x, launchOrigin.y)
-                    },
-            ) {
-                TopBar(
-                    onOpenSettings = { showSettings = true },
-                    tuneFocus = tuneFocus,
-                    backdrop = backdrop,
-                    glassLive = !transitioning,
+        }
+
+        // Launcher chrome (settings page or the grid). Hidden entirely in Frame Art, which is a pure,
+        // chrome-free "painting".
+        if (!frameOn) {
+            // The settings page takes over the whole screen (not a modal), so D-pad focus can't reach
+            // the launcher behind it; the launcher isn't composed while settings is open.
+            if (showSettings) {
+                SettingsScreen(
+                    settings = settings,
+                    onWallpaper = viewModel::setWallpaper,
+                    onAnimated = viewModel::setAnimated,
+                    onBlurred = viewModel::setBlurred,
+                    onColumns = viewModel::setColumns,
+                    onPickImage = pickImage,
+                    onUseImage = { viewModel.setUseImageWallpaper(true) },
+                    onScanTvContent = { showTvProbe = true },
+                    favoriteApps = uiState.dockApps,
+                    onUseAppArtwork = viewModel::setUseAppArtwork,
+                    onToggleArtworkApp = viewModel::setArtworkApp,
+                    theme = settings.theme,
+                    onTheme = viewModel::setTheme,
+                    reduceMotion = settings.reduceMotion,
+                    onReduceMotion = viewModel::setReduceMotion,
+                    hiddenApps = uiState.allApps.filter { it.packageName in settings.hiddenApps },
+                    onUnhideApp = { viewModel.setAppHidden(it, false) },
+                    onFrameSource = viewModel::setFrameSource,
+                    onPickFrameFolder = pickFrameFolder,
+                    onPickFramePhoto = pickFramePhoto,
+                    onFrameInterval = viewModel::setFrameInterval,
+                    onFrameAutoStart = viewModel::setFrameAutoStart,
+                    onFrameClock = viewModel::setFrameClock,
+                    onFrameClockPosition = viewModel::setFrameClockPosition,
+                    onFrameClockSize = viewModel::setFrameClockSize,
+                    onFrameShowDate = viewModel::setFrameShowDate,
+                    onFrameMotion = viewModel::setFrameMotion,
+                    onFrameShuffle = viewModel::setFrameShuffle,
+                    onOpenAccessibilitySettings = { HomeSetup.openAccessibilitySettings(context) },
+                    onChooseHomeApp = chooseHomeApp,
+                    onClose = { showSettings = false },
                 )
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    when {
-                        uiState.isLoading -> Centered { Text("Loading apps…", color = colors.text, fontSize = 20.sp) }
-                        uiState.allApps.isEmpty() -> Centered { Text("No apps found", color = colors.text, fontSize = 20.sp) }
-                        else -> LauncherContent(
-                            dockApps = uiState.dockApps,
-                            gridApps = visibleGrid,
-                            iconLoader = container.iconLoader,
-                            onAppFocused = viewModel::onAppFocused,
-                            onAppClicked = { pkg, sourceBounds -> launchApp(pkg, sourceBounds) },
-                            onToggleFavorite = viewModel::toggleFavorite,
-                            onReorder = viewModel::setFavoritesOrder,
-                            columns = settings.columns,
-                            backdrop = backdrop,
-                            topFocusRequester = tuneFocus,
-                            onFavoriteHover = { favoriteHover = it },
-                            reduceMotion = settings.reduceMotion,
-                            onHideApp = { viewModel.setAppHidden(it, true) },
-                            onAppInfo = { viewModel.openAppInfo(it) },
-                            onUninstall = { viewModel.uninstallApp(it) },
-                            glassLive = !transitioning,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            // p: 1 = settled, <1 = mid launch/return. Home zooms toward the launched tile
+                            // on the way out and scales back DOWN to rest (with a fade) on return.
+                            val p = enter.value
+                            alpha = p
+                            val s = 1f + (1f - p) * 0.16f
+                            scaleX = s
+                            scaleY = s
+                            transformOrigin = TransformOrigin(launchOrigin.x, launchOrigin.y)
+                        },
+                ) {
+                    TopBar(
+                        onOpenSettings = { showSettings = true },
+                        onEnterFrame = { frameOn = true },
+                        tuneFocus = tuneFocus,
+                        backdrop = backdrop,
+                        glassLive = !transitioning,
+                    )
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        when {
+                            uiState.isLoading -> Centered { Text("Loading apps…", color = colors.text, fontSize = 20.sp) }
+                            uiState.allApps.isEmpty() -> Centered { Text("No apps found", color = colors.text, fontSize = 20.sp) }
+                            else -> LauncherContent(
+                                dockApps = uiState.dockApps,
+                                gridApps = visibleGrid,
+                                iconLoader = container.iconLoader,
+                                onAppFocused = viewModel::onAppFocused,
+                                onAppClicked = { pkg, sourceBounds -> launchApp(pkg, sourceBounds) },
+                                onToggleFavorite = viewModel::toggleFavorite,
+                                onReorder = viewModel::setFavoritesOrder,
+                                columns = settings.columns,
+                                backdrop = backdrop,
+                                topFocusRequester = tuneFocus,
+                                onFavoriteHover = { favoriteHover = it },
+                                reduceMotion = settings.reduceMotion,
+                                onHideApp = { viewModel.setAppHidden(it, true) },
+                                onAppInfo = { viewModel.openAppInfo(it) },
+                                onUninstall = { viewModel.uninstallApp(it) },
+                                glassLive = !transitioning,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                 }
             }
@@ -398,19 +456,18 @@ fun LauncherScreen(
             ImagePickerDialog(onPick = { applyPickedImage(it) }, onDismiss = { showPicker = false })
         }
 
-        if (showTvProbe) {
-            TvProbeDialog(onDismiss = { showTvProbe = false })
+        if (showFolderPicker) {
+            FolderPickerDialog(
+                onPick = { id, name ->
+                    showFolderPicker = false
+                    viewModel.setFrameFolder(id, name)
+                },
+                onDismiss = { showFolderPicker = false },
+            )
         }
 
-        // Drawn last so it covers everything (grid, settings, dialogs); key handling above wakes it.
-        if (screensaverOn) {
-            Screensaver(
-                posterPackages = uiState.dockApps.map { it.packageName },
-                watchNext = uiState.watchNext,
-                source = settings.screensaverSource,
-                reduceMotion = settings.reduceMotion,
-                modifier = Modifier.fillMaxSize(),
-            )
+        if (showTvProbe) {
+            TvProbeDialog(onDismiss = { showTvProbe = false })
         }
     }
     }
@@ -419,6 +476,7 @@ fun LauncherScreen(
 @Composable
 private fun TopBar(
     onOpenSettings: () -> Unit,
+    onEnterFrame: () -> Unit,
     tuneFocus: FocusRequester,
     backdrop: GraphicsLayer,
     glassLive: Boolean,
@@ -450,6 +508,14 @@ private fun TopBar(
         ) {
             PillButton(onClick = { openWifiSettings(context) }, contentDescription = "Wi-Fi settings") {
                 WifiIndicator(status = net, tint = colors.text, modifier = Modifier.size(22.dp))
+            }
+            PillButton(onClick = onEnterFrame, contentDescription = "Frame Art") {
+                Image(
+                    painterResource(R.drawable.ic_frame),
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                    colorFilter = ColorFilter.tint(colors.text),
+                )
             }
             PillButton(
                 onClick = onOpenSettings,

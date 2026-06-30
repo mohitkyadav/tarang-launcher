@@ -60,14 +60,15 @@ fun rememberWallpaperThumb(path: String?): ImageBitmap? {
 }
 
 /**
- * Copies the picked image into `filesDir/wallpaper/` and returns the new absolute path (null on
- * failure). We copy rather than persist the content URI so the wallpaper keeps working after a
- * reboot or if the original is deleted. Old copies are cleared first to avoid piling up.
+ * Copies the picked image into `filesDir/<subdir>/` and returns the new absolute path (null on
+ * failure). We copy rather than persist the content URI so the image keeps working after a reboot or
+ * if the original is deleted. Old copies in that subdir are cleared first to avoid piling up.
+ * [subdir] keeps independent copies apart (e.g. the wallpaper vs. the single Frame Art photo).
  */
-fun copyImageToInternal(context: Context, uri: Uri): String? = runCatching {
-    val dir = File(context.filesDir, "wallpaper").apply { mkdirs() }
+fun copyImageToInternal(context: Context, uri: Uri, subdir: String = "wallpaper"): String? = runCatching {
+    val dir = File(context.filesDir, subdir).apply { mkdirs() }
     dir.listFiles()?.forEach { it.delete() }
-    val out = File(dir, "wp_${System.currentTimeMillis()}.jpg")
+    val out = File(dir, "img_${System.currentTimeMillis()}.jpg")
     context.contentResolver.openInputStream(uri)?.use { input ->
         out.outputStream().use { input.copyTo(it) }
     } ?: return null

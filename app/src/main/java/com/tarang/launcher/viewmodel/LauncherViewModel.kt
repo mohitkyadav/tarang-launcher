@@ -10,7 +10,6 @@ import com.tarang.launcher.data.AppRepository
 import com.tarang.launcher.data.FavoritesStore
 import com.tarang.launcher.data.LauncherSettings
 import com.tarang.launcher.data.SettingsStore
-import com.tarang.launcher.data.WatchNextItem
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,7 +25,6 @@ data class LauncherUiState(
     val dockApps: List<AppInfo> = emptyList(),
     val gridApps: List<AppInfo> = emptyList(),
     val allApps: List<AppInfo> = emptyList(),
-    val watchNext: List<WatchNextItem> = emptyList(),
 )
 
 @OptIn(FlowPreview::class)
@@ -39,14 +37,13 @@ class LauncherViewModel(
     private val apps = MutableStateFlow<List<AppInfo>>(emptyList())
     private val loading = MutableStateFlow(true)
     private val _focusedPackage = MutableStateFlow<String?>(null)
-    private val watchNext = MutableStateFlow<List<WatchNextItem>>(emptyList())
 
     /** The currently focused app package — drives the ambient wallpaper glow. Kept OUT of [uiState]
      *  so moving focus doesn't recompute the dock/grid lists (and recompose the grid) on every press. */
     val focusedPackage: StateFlow<String?> = _focusedPackage
 
     val uiState: StateFlow<LauncherUiState> =
-        combine(loading, apps, favoritesStore.favorites, watchNext) { isLoading, allApps, favorites, watchNextItems ->
+        combine(loading, apps, favoritesStore.favorites) { isLoading, allApps, favorites ->
             val favoriteSet = favorites.toSet()
             val dock = favorites.mapNotNull { pkg -> allApps.firstOrNull { it.packageName == pkg } }
             val grid = allApps.filterNot { it.packageName in favoriteSet }
@@ -55,7 +52,6 @@ class LauncherViewModel(
                 dockApps = dock,
                 gridApps = grid,
                 allApps = allApps,
-                watchNext = watchNextItems,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LauncherUiState())
 
@@ -79,7 +75,6 @@ class LauncherViewModel(
             val loaded = repository.loadApps()
             apps.value = loaded
             loading.value = false
-            watchNext.value = repository.watchNext()
             if (!favoritesStore.seeded.first()) {
                 favoritesStore.setFavorites(loaded.take(DEFAULT_DOCK_COUNT).map { it.packageName })
                 favoritesStore.markSeeded()
@@ -121,9 +116,21 @@ class LauncherViewModel(
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { settingsStore.setReduceMotion(value) }.let {}
     fun setAppHidden(packageName: String, hidden: Boolean) =
         viewModelScope.launch { settingsStore.setAppHidden(packageName, hidden) }.let {}
-    fun setScreensaverTimeout(sec: Int) = viewModelScope.launch { settingsStore.setScreensaverTimeout(sec) }.let {}
-    fun setScreensaverSource(source: com.tarang.launcher.data.ScreensaverSource) =
-        viewModelScope.launch { settingsStore.setScreensaverSource(source) }.let {}
+    fun setFrameSource(source: com.tarang.launcher.data.FrameSource) =
+        viewModelScope.launch { settingsStore.setFrameSource(source) }.let {}
+    fun setFrameFolder(id: String, name: String) =
+        viewModelScope.launch { settingsStore.setFrameFolder(id, name) }.let {}
+    fun setFrameImage(path: String) = viewModelScope.launch { settingsStore.setFrameImage(path) }.let {}
+    fun setFrameInterval(sec: Int) = viewModelScope.launch { settingsStore.setFrameInterval(sec) }.let {}
+    fun setFrameAutoStart(sec: Int) = viewModelScope.launch { settingsStore.setFrameAutoStart(sec) }.let {}
+    fun setFrameClock(value: Boolean) = viewModelScope.launch { settingsStore.setFrameClock(value) }.let {}
+    fun setFrameClockPosition(pos: com.tarang.launcher.data.FrameClockPosition) =
+        viewModelScope.launch { settingsStore.setFrameClockPosition(pos) }.let {}
+    fun setFrameClockSize(size: com.tarang.launcher.data.FrameClockSize) =
+        viewModelScope.launch { settingsStore.setFrameClockSize(size) }.let {}
+    fun setFrameShowDate(value: Boolean) = viewModelScope.launch { settingsStore.setFrameShowDate(value) }.let {}
+    fun setFrameMotion(value: Boolean) = viewModelScope.launch { settingsStore.setFrameMotion(value) }.let {}
+    fun setFrameShuffle(value: Boolean) = viewModelScope.launch { settingsStore.setFrameShuffle(value) }.let {}
 
     companion object {
         private const val DEFAULT_DOCK_COUNT = 5

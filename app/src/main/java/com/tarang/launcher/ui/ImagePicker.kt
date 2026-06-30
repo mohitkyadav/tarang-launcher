@@ -106,7 +106,7 @@ private fun decodeUriThumb(context: Context, uri: Uri, reqW: Int, reqH: Int): Im
 }.getOrNull()
 
 @Composable
-private fun rememberUriThumb(uri: Uri): ImageBitmap? {
+fun rememberUriThumb(uri: Uri): ImageBitmap? {
     val context = LocalContext.current
     val image by produceState<ImageBitmap?>(initialValue = null, key1 = uri.toString()) {
         value = withContext(Dispatchers.IO) { decodeUriThumb(context, uri, 320, 200) }
