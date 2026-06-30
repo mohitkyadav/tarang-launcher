@@ -76,11 +76,11 @@ import com.tarang.launcher.R
 import com.tarang.launcher.di.AppContainer
 import com.tarang.launcher.home.HomeSetup
 import com.tarang.launcher.viewmodel.LauncherViewModel
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import kotlin.math.roundToInt
 
 /**
  * Top-level launcher UI: an animated wallpaper behind a clean app grid, with a top bar holding the
@@ -229,8 +229,9 @@ fun LauncherScreen(
     LaunchedEffect(launchTick) {
         if (launchTick > 0) {
             // Plays during the device's app-open latency so the click gets immediate feedback: the
-            // home zooms toward the tile and fades as the app takes over.
-            enter.animateTo(0f, tween(durationMillis = 340, easing = FastOutLinearInEasing))
+            // home zooms toward the tile and fades as the app takes over. Kept short to match the
+            // system's (fast) tile scale-up so the two read as one motion.
+            enter.animateTo(0f, tween(durationMillis = 240, easing = FastOutLinearInEasing))
         }
     }
     LaunchedEffect(returnTick) {
