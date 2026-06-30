@@ -1,9 +1,11 @@
 package com.tarang.launcher.home
 
+import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.provider.Settings
 
 /**
@@ -16,8 +18,18 @@ import android.provider.Settings
  */
 object HomeSetup {
 
-    /** True when Tarang is the resolved default Home app. */
+    /** True when Tarang is the device's preferred (default) Home app. */
     fun isDefaultHome(context: Context): Boolean {
+        // API 31+: ask RoleManager whether we hold the HOME role — the authoritative signal. The old
+        // resolveActivity(MATCH_DEFAULT_ONLY) check can return the system resolver/chooser activity
+        // instead of the real default, which made a correctly-selected Tarang read as "Not set".
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val rm = context.getSystemService(RoleManager::class.java)
+            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME)) {
+                return rm.isRoleHeld(RoleManager.ROLE_HOME)
+            }
+        }
+        // Fallback (older devices / no role manager): resolve the HOME intent and compare the package.
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         val resolved = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
         return resolved?.activityInfo?.packageName == context.packageName

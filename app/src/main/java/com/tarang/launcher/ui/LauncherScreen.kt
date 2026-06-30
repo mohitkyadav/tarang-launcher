@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -13,6 +14,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -148,6 +150,9 @@ fun LauncherScreen(
     // Frame Art ("painting") mode. Declared here so the wallpaper selection below falls back to the
     // base wallpaper while it's on (no hover artwork bleeding into the frame).
     var frameOn by remember { mutableStateOf(false) }
+    // Owns D-pad focus while Frame Art is showing (see the capture layer below), so the grid behind it
+    // can't be navigated or clicked (which would silently launch an app).
+    val frameCaptureFocus = remember { FocusRequester() }
     val artworkApp = if (!showSettings && !frameOn) {
         favoriteHover?.takeIf { settings.useAppArtwork && it in settings.artworkApps }
     } else {
@@ -198,15 +203,26 @@ fun LauncherScreen(
     val framePartly by remember { derivedStateOf { frameProgress.value > 0.001f } }
     val frameMoving by remember { derivedStateOf { frameProgress.value > 0.001f && frameProgress.value < 0.999f } }
 
+    // When Frame Art turns on, pull focus onto the capture layer so nothing behind it stays focused
+    // (otherwise D-pad keys reach the grid — moving focus, or launching the focused app on OK). On
+    // exit the grid recomposes from scratch and reclaims focus via its own first-card requester.
+    LaunchedEffect(frameOn) {
+        if (frameOn) runCatching { frameCaptureFocus.requestFocus() }
+    }
+
     // Is Frame Art configured to a real source (folder/single)? The "current wallpaper" source has no
     // art of its own — it just shows the wallpaper full-screen — so there's nothing to overlay there.
     val frameArtConfigured = (settings.frameSource == FrameSource.FOLDER && settings.frameFolderId != null) ||
         (settings.frameSource == FrameSource.SINGLE && settings.frameImagePath != null)
     val frameArtIsWallpaper = settings.useFrameArtWallpaper && frameArtConfigured
 
-    // The art drifts + cycles only when fully in frame mode; as the home wallpaper it's always a still
-    // frame (same framing as the frame, so entering frame mode just begins the drift — no jump).
-    val artDrift = frameSettled && settings.frameMotion && !settings.reduceMotion
+    // The drift is composed the whole time Frame Art is present (not just when settled); its amplitude
+    // follows the transition progress, read at draw time, so the float eases in on entry and glides
+    // back to centre on exit rather than snapping when a key flips it off. At rest (chrome up) it's
+    // disposed entirely — a still wallpaper costs nothing. Cycling still only runs when fully settled.
+    val motionOn = settings.frameMotion && !settings.reduceMotion
+    val artDrift = framePartly && motionOn
+    val artDriftAmount: () -> Float = { frameProgress.value }
     val artCycle = frameSettled
 
     // App launch / return choreography. The system still grows the app window out of the tapped tile;
@@ -287,6 +303,12 @@ fun LauncherScreen(
                 }
             },
     ) {
+        // Frame Art owns Back too: consume it to wake the launcher instead of letting the system act
+        // on it (which flashes the stock launcher / can finish this activity).
+        BackHandler(enabled = frameOn || framePartly) {
+            frameOn = false
+            interaction++
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -317,6 +339,7 @@ fun LauncherScreen(
                     frameArtIsWallpaper -> FrameArtContent(
                         settings,
                         drift = artDrift,
+                        driftAmount = artDriftAmount,
                         cycle = artCycle,
                         isDark = isDark,
                         modifier = Modifier.fillMaxSize(),
@@ -344,7 +367,7 @@ fun LauncherScreen(
             // art of its own, so nothing overlays — it just shows the wallpaper full-screen.)
             if (framePartly && frameArtConfigured && !frameArtIsWallpaper) {
                 Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = frameProgress.value }) {
-                    FrameArtContent(settings, drift = artDrift, cycle = artCycle, isDark = isDark, modifier = Modifier.fillMaxSize())
+                    FrameArtContent(settings, drift = artDrift, driftAmount = artDriftAmount, cycle = artCycle, isDark = isDark, modifier = Modifier.fillMaxSize())
                 }
             }
         }
@@ -481,6 +504,19 @@ fun LauncherScreen(
         if (showTvProbe) {
             TvProbeDialog(onDismiss = { showTvProbe = false })
         }
+
+        // Transparent focus trap, on top while Frame Art is showing: it owns D-pad focus so the grid
+        // (still composed during the entry/exit transition, removed once settled) can't be navigated
+        // or clicked behind the art. The root key handler above turns the first key into "wake", so
+        // this only needs to hold focus — it has no key logic of its own.
+        if (frameOn || framePartly) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .focusRequester(frameCaptureFocus)
+                    .focusable(),
+            )
+        }
     }
     }
 }
@@ -605,13 +641,14 @@ private fun Centered(content: @Composable () -> Unit) {
 private fun FrameArtContent(
     settings: LauncherSettings,
     drift: Boolean,
+    driftAmount: () -> Float,
     cycle: Boolean,
     isDark: Boolean,
     modifier: Modifier = Modifier,
 ) {
     when {
         settings.frameSource == FrameSource.SINGLE && settings.frameImagePath != null ->
-            Box(modifier = modifier.frameParallax(drift)) {
+            Box(modifier = modifier.frameParallax(drift, driftAmount)) {
                 ImageWallpaper(
                     path = settings.frameImagePath!!,
                     blurred = false,
@@ -625,6 +662,7 @@ private fun FrameArtContent(
                 folderId = settings.frameFolderId!!,
                 intervalSec = settings.frameIntervalSec,
                 drift = drift,
+                driftAmount = driftAmount,
                 cycle = cycle,
                 shuffle = settings.frameShuffle,
                 modifier = modifier,

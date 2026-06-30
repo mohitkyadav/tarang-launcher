@@ -76,6 +76,7 @@ fun FrameSlideshow(
     folderId: String,
     intervalSec: Int,
     drift: Boolean,
+    driftAmount: () -> Float,
     cycle: Boolean,
     shuffle: Boolean,
     modifier: Modifier = Modifier,
@@ -118,7 +119,7 @@ fun FrameSlideshow(
                     bitmap = img,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize().frameParallax(drift),
+                    modifier = Modifier.fillMaxSize().frameParallax(drift, driftAmount),
                 )
             }
         }
@@ -132,7 +133,7 @@ fun FrameSlideshow(
  * still wallpaper costs nothing and doesn't keep the GPU awake — important on weak TV hardware.
  */
 @Composable
-fun Modifier.frameParallax(enabled: Boolean): Modifier =
+fun Modifier.frameParallax(enabled: Boolean, amount: () -> Float = { 1f }): Modifier =
     if (enabled) {
         val transition = rememberInfiniteTransition(label = "frameFloat")
         val phase by transition.animateFloat(
@@ -142,11 +143,13 @@ fun Modifier.frameParallax(enabled: Boolean): Modifier =
             label = "frameFloatPhase",
         )
         this.graphicsLayer {
+            // [amount] (0..1, read here at draw time) eases the drift in with the frame transition and,
+            // crucially, back out on exit — so pressing a key glides the image back to centre instead
+            // of snapping from its current drifted offset to (0,0) in a single frame.
+            val a = amount()
             val amp = size.minDimension * 0.012f
-            // Drift starts at phase 0 → translation (0,0), i.e. exactly the still framing, then eases
-            // away — so turning the drift on (entering frame mode) doesn't jump.
-            translationX = sin(phase) * amp
-            translationY = sin(phase * 2f) * (amp * 0.55f)
+            translationX = sin(phase) * amp * a
+            translationY = sin(phase * 2f) * (amp * 0.55f) * a
             scaleX = FRAME_BASE_SCALE
             scaleY = FRAME_BASE_SCALE
         }
