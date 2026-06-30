@@ -9,6 +9,11 @@ tvMaterial = "1.0.0"
 coroutines = "1.8.1"
 palette = "1.0.0"
 datastore = "1.1.1"
+# Baseline Profile toolchain (macrobenchmark generates the profile; profileinstaller applies it).
+benchmark = "1.3.3"
+profileinstaller = "1.4.1"
+uiautomator = "2.3.0"
+testExtJunit = "1.2.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,7 +38,17 @@ androidx-palette = { group = "androidx.palette", name = "palette-ktx", version.r
 # DataStore — persisted dock favorites
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
+# ProfileInstaller — applies the bundled baseline profile at install/idle time (key for sideloaded APKs).
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
+
+# Baseline Profile generation (lives only in the :baselineprofile test module).
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "testExtJunit" }
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-test = { id = "com.android.test", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+baselineprofile = { id = "androidx.baselineprofile", version.ref = "benchmark" }

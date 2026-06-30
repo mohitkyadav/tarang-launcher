@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.baselineprofile)
 }
 
 android {
@@ -57,6 +58,13 @@ dependencies {
     implementation(libs.androidx.tv.material)
     implementation(libs.androidx.palette)
     implementation(libs.androidx.datastore.preferences)
+    // Applies the bundled baseline profile on-device (esp. for sideloaded APKs, which don't get
+    // Play's install-time AOT — ProfileInstaller writes it and ART compiles during idle).
+    implementation(libs.androidx.profileinstaller)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // The :baselineprofile module produces app/src/<variant>/generated/baselineProfiles/*.txt,
+    // which the baselineprofile plugin merges into the release APK at build time.
+    "baselineProfile"(project(":baselineprofile"))
 }
