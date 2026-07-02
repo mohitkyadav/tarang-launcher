@@ -46,10 +46,13 @@ fun Clock(modifier: Modifier = Modifier) {
     }
 }
 
-/** Runs [onTick] now and then on every wall-clock minute boundary. */
+/**
+ * Runs [onTick] now and then on every wall-clock minute boundary, but only while the launcher is
+ * on-screen — no point re-formatting the time while the app is hidden.
+ */
 @Composable
 private fun LaunchedEffectMinuteTick(onTick: () -> Unit) {
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    RunWhileStarted {
         while (true) {
             onTick()
             val millis = System.currentTimeMillis()

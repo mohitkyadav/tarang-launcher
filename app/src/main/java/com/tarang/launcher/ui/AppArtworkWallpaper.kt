@@ -94,8 +94,9 @@ fun AppArtworkWallpaper(
 
 @Composable
 private fun LaunchedEffectSlideshow(size: Int, onAdvance: () -> Unit) {
-    androidx.compose.runtime.LaunchedEffect(size) {
-        if (size <= 1) return@LaunchedEffect
+    if (size <= 1) return
+    // Only advance (and decode the next poster) while the launcher is on-screen.
+    RunWhileStarted(size) {
         while (true) {
             delay(SLIDE_MS)
             onAdvance()

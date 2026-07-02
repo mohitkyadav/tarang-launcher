@@ -46,6 +46,9 @@ import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Text
 import com.tarang.launcher.R
 import com.tarang.launcher.data.FrameClockPosition
@@ -131,12 +134,17 @@ fun FrameSlideshow(
     }
 
     // Auto-advance while [cycle] is on (full frame mode). Re-keyed on [index] so a manual page also
-    // resets this timer — no jarring auto-jump right after the user pages by hand. A still wallpaper
-    // (cycle off) or a single photo runs no timer.
-    LaunchedEffect(index, photos, intervalMs, cycle) {
+    // resets this timer — no jarring auto-jump right after the user pages by hand. Wrapped in
+    // repeatOnLifecycle(STARTED) so the timer (and the full-size bitmap decode each advance triggers)
+    // pauses while the app is hidden — screen off / another app up — instead of decoding all night. A
+    // still wallpaper (cycle off) or a single photo runs no timer.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(index, photos, intervalMs, cycle, lifecycleOwner) {
         if (cycle && photos.size > 1) {
-            delay(intervalMs)
-            index = (index + 1) % photos.size
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                delay(intervalMs)
+                index = (index + 1) % photos.size
+            }
         }
     }
 
@@ -226,9 +234,9 @@ fun FrameClock(
     val dateFormat = remember { SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()) }
 
     var now by remember { mutableStateOf(Date(System.currentTimeMillis())) }
-    LaunchedEffect(Unit) {
+    RunWhileStarted {
         while (true) {
-            now = Date(System.currentTimeMillis())
+            now = Date(System.currentTimeMillis()) // refresh immediately on (re)start so it's never stale
             val millis = System.currentTimeMillis()
             delay(60_000L - millis % 60_000L) // tick on the next minute boundary
         }
