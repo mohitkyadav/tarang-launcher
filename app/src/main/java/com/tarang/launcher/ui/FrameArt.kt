@@ -53,10 +53,13 @@ import androidx.tv.material3.Text
 import com.tarang.launcher.R
 import com.tarang.launcher.data.FrameClockPosition
 import com.tarang.launcher.data.FrameClockSize
+import com.tarang.launcher.data.FrameSource
+import com.tarang.launcher.data.LauncherSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.PI
@@ -228,6 +231,7 @@ fun FrameClock(
     size: FrameClockSize,
     showDate: Boolean,
     reveal: () -> Float = { 1f },
+    weather: WeatherData? = null,
     modifier: Modifier = Modifier,
 ) {
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
@@ -313,8 +317,97 @@ fun FrameClock(
                     style = TextStyle(shadow = lift),
                 )
             }
+            weather?.let { w ->
+                Text(
+                    text = "${w.glyph}  ${w.tempText}",
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontFamily = FrameClockFont,
+                    fontWeight = FontWeight.W300,
+                    fontSize = dateSp.sp,
+                    style = TextStyle(shadow = lift),
+                )
+            }
         }
     }
+}
+
+/**
+ * Renders the configured Frame Art (folder slideshow or single photo) — used both as the live home
+ * wallpaper and as the full-screen frame (and by the screensaver dream). [drift] enables the slow
+ * parallax float; [cycle] enables the folder slideshow's advance. The "current wallpaper" source
+ * renders nothing (the wallpaper shows through instead).
+ */
+@Composable
+internal fun FrameArtContent(
+    settings: LauncherSettings,
+    drift: Boolean,
+    driftAmount: () -> Float,
+    cycle: Boolean,
+    isDark: Boolean,
+    nav: FrameNavState,
+    modifier: Modifier = Modifier,
+) {
+    when {
+        settings.frameSource == FrameSource.SINGLE && settings.frameImagePath != null ->
+            Box(modifier = modifier.frameParallax(drift, driftAmount)) {
+                ImageWallpaper(
+                    path = settings.frameImagePath!!,
+                    isDark = isDark,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+        settings.frameSource == FrameSource.FOLDER && settings.frameFolderId != null ->
+            FrameSlideshow(
+                folderId = settings.frameFolderId!!,
+                intervalSec = settings.frameIntervalSec,
+                drift = drift,
+                driftAmount = driftAmount,
+                cycle = cycle,
+                shuffle = settings.frameShuffle,
+                nav = nav,
+                modifier = modifier,
+            )
+    }
+}
+
+/** Deepest the night dim gets (a black scrim's max alpha over the art in the small hours). */
+private const val NIGHT_MAX_DIM = 0.62f
+
+/**
+ * A gentle black scrim that ramps up during the deep-night hours so Frame Art isn't blasting light at
+ * 2am — clear during the day, darkest 00:00–05:00, easing off by 07:00. Recomputed on the minute (and
+ * paused while hidden, via [RunWhileStarted]). [reveal] fades it in with the frame transition.
+ */
+@Composable
+fun NightDimScrim(reveal: () -> Float = { 1f }, modifier: Modifier = Modifier) {
+    var dim by remember { mutableStateOf(nightDim()) }
+    RunWhileStarted {
+        while (true) {
+            dim = nightDim()
+            val millis = System.currentTimeMillis()
+            delay(60_000L - millis % 60_000L) // recompute on the next minute boundary
+        }
+    }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .graphicsLayer { alpha = reveal() }
+            .background(Color.Black.copy(alpha = dim)),
+    )
+}
+
+/** Night-dim factor for the current local time, scaled to [NIGHT_MAX_DIM]. */
+private fun nightDim(): Float {
+    val cal = Calendar.getInstance()
+    val h = cal.get(Calendar.HOUR_OF_DAY) + cal.get(Calendar.MINUTE) / 60f
+    val night = when {
+        h >= 21f -> (h - 21f) / 3f // 21:00 → 00:00 ramps 0 → 1
+        h < 5f -> 1f // deep night
+        h < 7f -> 1f - (h - 5f) / 2f // 05:00 → 07:00 ramps 1 → 0
+        else -> 0f // daytime
+    }.coerceIn(0f, 1f)
+    return night * NIGHT_MAX_DIM
 }
 
 /** All image URIs in a MediaStore bucket (folder), newest first. Empty without photo permission. */

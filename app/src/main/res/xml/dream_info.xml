@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Metadata for FrameArtDreamService. No settings activity: the dream reuses the launcher's Frame
+     Art configuration (source, clock, weather, night-dim). -->
+<dream xmlns:android="http://schemas.android.com/apk/res/android" />

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -54,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -69,7 +72,9 @@ import androidx.tv.material3.Text
 import com.tarang.launcher.R
 import com.tarang.launcher.data.FrameSource
 import com.tarang.launcher.data.LauncherSettings
+import com.tarang.launcher.data.WeatherUnit
 import com.tarang.launcher.di.AppContainer
+import com.tarang.launcher.home.HomeRedirectService
 import com.tarang.launcher.home.HomeSetup
 import com.tarang.launcher.viewmodel.LauncherViewModel
 import kotlinx.coroutines.Dispatchers
@@ -162,6 +167,17 @@ fun LauncherScreen(
 
     // Which motion "personality" the transitions use (an experiment switch in Appearance).
     val style = settings.animStyle
+
+    // One weather fetch shared by the home top bar and the Frame Art clock (enabled if either surface
+    // wants it); each surface then shows it per its own toggle. Now-playing media for the top-bar chip
+    // (null when off, no notification access, or nothing playing).
+    val weather = rememberWeather(
+        enabled = settings.weatherOnHome || settings.frameWeather,
+        fahrenheit = settings.weatherUnit == WeatherUnit.FAHRENHEIT,
+        lat = settings.weatherLat,
+        lon = settings.weatherLon,
+    )
+    val nowPlaying = rememberNowPlaying(settings.nowPlaying)
 
     // "Choose Home app" is only offered when the device actually exposes a Home-app chooser (often
     // absent on Google TV, where the redirect accessibility service is the real mechanism).
@@ -405,14 +421,21 @@ fun LauncherScreen(
             }
         }
 
-        // Big Frame Art clock. Its entrance (fade + slight scale on the text, fade-only on the scrim) is
-        // sequenced to arrive in the back half of the transition, as the chrome clears.
+        // Night dimming: a scrim over the art (below the clock, so the time stays readable) that ramps
+        // up in the small hours. Fades in with the frame transition.
+        if (framePartly && settings.frameNightDim) {
+            NightDimScrim(reveal = { frameProgress.value }, modifier = Modifier.fillMaxSize())
+        }
+
+        // Big Frame Art clock (with optional weather). Its entrance (fade + slight scale on the text,
+        // fade-only on the scrim) is sequenced to arrive in the back half of the transition.
         if (framePartly && settings.frameClock) {
             FrameClock(
                 position = settings.frameClockPosition,
                 size = settings.frameClockSize,
                 showDate = settings.frameShowDate,
                 reveal = { ((frameProgress.value - 0.45f) / 0.55f).coerceIn(0f, 1f) },
+                weather = if (settings.frameWeather) weather else null,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -453,6 +476,15 @@ fun LauncherScreen(
                     onFrameMotion = viewModel::setFrameMotion,
                     onFrameShuffle = viewModel::setFrameShuffle,
                     onUseFrameArtWallpaper = viewModel::setUseFrameArtWallpaper,
+                    onWeatherOnHome = viewModel::setWeatherOnHome,
+                    onFrameWeather = viewModel::setFrameWeather,
+                    onWeatherUnit = viewModel::setWeatherUnit,
+                    onWeatherCity = viewModel::setWeatherCity,
+                    onWeatherAuto = viewModel::clearWeatherCity,
+                    onFrameNightDim = viewModel::setFrameNightDim,
+                    onNowPlaying = viewModel::setNowPlaying,
+                    onOpenScreensaverSettings = { openScreensaverSettings(context) },
+                    onOpenNotificationAccess = { openNotificationAccess(context) },
                     onOpenAccessibilitySettings = { HomeSetup.openAccessibilitySettings(context) },
                     onChooseHomeApp = chooseHomeApp,
                     onClose = { showSettings = false },
@@ -474,6 +506,11 @@ fun LauncherScreen(
                         TopBar(
                             onOpenSettings = { showSettings = true },
                             onEnterFrame = { frameOn = true },
+                            // Best-effort real sleep via the accessibility service; if it isn't
+                            // connected, fall back to entering Frame Art as an ambient "screensaver".
+                            onSleep = { if (!HomeRedirectService.requestSleep()) frameOn = true },
+                            nowPlaying = nowPlaying,
+                            homeWeather = if (settings.weatherOnHome) weather else null,
                             tuneFocus = tuneFocus,
                             backdrop = backdrop,
                             // Keep the glass live through the Frame Art transition (the big full-screen
@@ -569,6 +606,9 @@ fun LauncherScreen(
 private fun TopBar(
     onOpenSettings: () -> Unit,
     onEnterFrame: () -> Unit,
+    onSleep: () -> Unit,
+    nowPlaying: NowPlaying?,
+    homeWeather: WeatherData?,
     tuneFocus: FocusRequester,
     backdrop: GraphicsLayer,
     glassLive: Boolean,
@@ -578,6 +618,7 @@ private fun TopBar(
     val context = LocalContext.current
     val net = rememberNetStatus()
     val colors = LocalLauncherColors.current
+    val tint = if (glassBlur) colors.textBackdrop else colors.textBackdropOpaque
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -585,17 +626,43 @@ private fun TopBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Each free-floating element is its own frosted-glass container, so text stays legible over
-        // any wallpaper without scrimming the whole image.
-        Clock(
-            modifier = Modifier
-                .frostedGlass(backdrop, RoundedCornerShape(18.dp), tint = if (glassBlur) colors.textBackdrop else colors.textBackdropOpaque, live = glassLive, refract = glassRefract, blur = glassBlur)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        // Left group: clock + (optional) weather, kept together as their own frosted containers so text
+        // stays legible over any wallpaper without scrimming the whole image.
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Clock(
+                modifier = Modifier
+                    .frostedGlass(backdrop, RoundedCornerShape(18.dp), tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            homeWeather?.let { w ->
+                Row(
+                    modifier = Modifier
+                        .frostedGlass(backdrop, RoundedCornerShape(percent = 50), tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(text = w.glyph, fontSize = 16.sp)
+                    Text(text = w.tempText, color = colors.text, fontSize = 18.sp)
+                }
+            }
+        }
+        // Centre: a compact "now playing" chip (only present while something is playing). Emits no
+        // layout node when null, so the bar keeps its plain clock↔pills spacing.
+        nowPlaying?.let {
+            NowPlayingChip(
+                nowPlaying = it,
+                backdrop = backdrop,
+                tint = tint,
+                glassLive = glassLive,
+                glassRefract = glassRefract,
+                glassBlur = glassBlur,
+            )
+        }
         // Status pill: Wi-Fi indicator + Android settings + launcher (tune) settings.
         Row(
             modifier = Modifier
-                .frostedGlass(backdrop, RoundedCornerShape(percent = 50), tint = if (glassBlur) colors.textBackdrop else colors.textBackdropOpaque, live = glassLive, refract = glassRefract, blur = glassBlur)
+                .frostedGlass(backdrop, RoundedCornerShape(percent = 50), tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -606,6 +673,14 @@ private fun TopBar(
             PillButton(onClick = onEnterFrame, contentDescription = "Frame Art") {
                 Image(
                     painterResource(R.drawable.ic_frame),
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                    colorFilter = ColorFilter.tint(colors.text),
+                )
+            }
+            PillButton(onClick = onSleep, contentDescription = "Sleep") {
+                Image(
+                    painterResource(R.drawable.ic_sleep),
                     contentDescription = null,
                     modifier = Modifier.size(22.dp),
                     colorFilter = ColorFilter.tint(colors.text),
@@ -660,6 +735,48 @@ private fun PillButton(
     }
 }
 
+/** A compact frosted "now playing" chip: album art + track title (artist if room). Display-only. */
+@Composable
+private fun NowPlayingChip(
+    nowPlaying: NowPlaying,
+    backdrop: GraphicsLayer,
+    tint: Color,
+    glassLive: Boolean,
+    glassRefract: Boolean,
+    glassBlur: Boolean,
+) {
+    val colors = LocalLauncherColors.current
+    Row(
+        modifier = Modifier
+            .widthIn(max = 320.dp)
+            .frostedGlass(backdrop, RoundedCornerShape(percent = 50), tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        nowPlaying.art?.let { art ->
+            Image(
+                bitmap = art,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)),
+            )
+        }
+        Column {
+            Text(
+                text = nowPlaying.title,
+                color = colors.text,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            nowPlaying.artist?.let {
+                Text(text = it, color = colors.textDim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
 private fun openWifiSettings(context: Context) {
     runCatching {
         context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -672,47 +789,22 @@ private fun openAndroidSettings(context: Context) {
     }
 }
 
+private fun openScreensaverSettings(context: Context) {
+    runCatching {
+        context.startActivity(Intent(Settings.ACTION_DREAM_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure {
+        // Some TVs bury the screensaver under general Settings; fall back there.
+        runCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+}
+
+private fun openNotificationAccess(context: Context) {
+    runCatching {
+        context.startActivity(Intent(NOTIFICATION_ACCESS_ACTION).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
 @Composable
 private fun Centered(content: @Composable () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
-}
-
-/**
- * Renders the configured Frame Art (folder slideshow or single photo) — used both as the live home
- * wallpaper and as the full-screen frame. [drift] enables the slow parallax float; [cycle] enables
- * the folder slideshow's advance. The "current wallpaper" source renders nothing (the wallpaper shows
- * through instead).
- */
-@Composable
-private fun FrameArtContent(
-    settings: LauncherSettings,
-    drift: Boolean,
-    driftAmount: () -> Float,
-    cycle: Boolean,
-    isDark: Boolean,
-    nav: FrameNavState,
-    modifier: Modifier = Modifier,
-) {
-    when {
-        settings.frameSource == FrameSource.SINGLE && settings.frameImagePath != null ->
-            Box(modifier = modifier.frameParallax(drift, driftAmount)) {
-                ImageWallpaper(
-                    path = settings.frameImagePath!!,
-                    isDark = isDark,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-
-        settings.frameSource == FrameSource.FOLDER && settings.frameFolderId != null ->
-            FrameSlideshow(
-                folderId = settings.frameFolderId!!,
-                intervalSec = settings.frameIntervalSec,
-                drift = drift,
-                driftAmount = driftAmount,
-                cycle = cycle,
-                shuffle = settings.frameShuffle,
-                nav = nav,
-                modifier = modifier,
-            )
-    }
 }

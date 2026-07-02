@@ -80,5 +80,32 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- Frame Art as the system screensaver. Selected under the device's Screensaver settings. -->
+        <service
+            android:name=".dream.FrameArtDreamService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.dream"
+                android:resource="@xml/dream_info" />
+        </service>
+
+        <!-- No-op notification listener: exists only so the user can grant notification access, which
+             is what lets us read the device's active media sessions for the "now playing" chip. -->
+        <service
+            android:name=".media.TarangNotificationListenerService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

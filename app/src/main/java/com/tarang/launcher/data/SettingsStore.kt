@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -38,6 +39,9 @@ enum class FrameClockPosition { BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT, CENTER
 
 /** Frame Art clock size. */
 enum class FrameClockSize { SMALL, MEDIUM, LARGE }
+
+/** Temperature unit for the weather readout. */
+enum class WeatherUnit { CELSIUS, FAHRENHEIT }
 
 /**
  * The transition "personality" used for the four big moves (enter/exit Frame Art, launch/return an
@@ -106,6 +110,21 @@ data class LauncherSettings(
     /** Play Frame Art as the launcher's wallpaper (so entering frame mode just dissolves the chrome).
      *  The home wallpaper is always a still frame; the art only comes alive in full frame mode. */
     val useFrameArtWallpaper: Boolean = false,
+    /** Show the weather readout in the top bar on the home screen. */
+    val weatherOnHome: Boolean = false,
+    /** Show the weather readout beside the Frame Art clock. */
+    val frameWeather: Boolean = false,
+    /** Temperature unit for the weather readout. */
+    val weatherUnit: WeatherUnit = WeatherUnit.CELSIUS,
+    /** Chosen city name for the weather (null = detect automatically by IP). */
+    val weatherCity: String? = null,
+    /** Cached coordinates of [weatherCity]; null when detecting automatically. */
+    val weatherLat: Double? = null,
+    val weatherLon: Double? = null,
+    /** Dim Frame Art automatically during the deep-night hours (so it isn't bright at 2am). */
+    val frameNightDim: Boolean = false,
+    /** Show a compact "now playing" chip in the top bar (needs notification-access to read sessions). */
+    val nowPlaying: Boolean = false,
 )
 
 /** Persists [LauncherSettings] via DataStore. */
@@ -145,6 +164,15 @@ class SettingsStore(context: Context) {
             frameMotion = p[FRAME_MOTION] ?: true,
             frameShuffle = p[FRAME_SHUFFLE] ?: false,
             useFrameArtWallpaper = p[USE_FRAME_WALLPAPER] ?: false,
+            weatherOnHome = p[WEATHER_ON_HOME] ?: false,
+            frameWeather = p[FRAME_WEATHER] ?: false,
+            weatherUnit = runCatching { WeatherUnit.valueOf(p[WEATHER_UNIT] ?: "CELSIUS") }
+                .getOrDefault(WeatherUnit.CELSIUS),
+            weatherCity = p[WEATHER_CITY],
+            weatherLat = p[WEATHER_LAT],
+            weatherLon = p[WEATHER_LON],
+            frameNightDim = p[FRAME_NIGHT_DIM] ?: false,
+            nowPlaying = p[NOW_PLAYING] ?: false,
         )
     }
 
@@ -208,6 +236,26 @@ class SettingsStore(context: Context) {
     suspend fun setFrameMotion(value: Boolean) = dataStore.edit { it[FRAME_MOTION] = value }
     suspend fun setFrameShuffle(value: Boolean) = dataStore.edit { it[FRAME_SHUFFLE] = value }
     suspend fun setUseFrameArtWallpaper(value: Boolean) = dataStore.edit { it[USE_FRAME_WALLPAPER] = value }
+    suspend fun setWeatherOnHome(value: Boolean) = dataStore.edit { it[WEATHER_ON_HOME] = value }
+    suspend fun setFrameWeather(value: Boolean) = dataStore.edit { it[FRAME_WEATHER] = value }
+    suspend fun setWeatherUnit(unit: WeatherUnit) = dataStore.edit { it[WEATHER_UNIT] = unit.name }
+
+    /** Pins the weather to a chosen city (with its resolved coordinates). */
+    suspend fun setWeatherCity(name: String, lat: Double, lon: Double) = dataStore.edit {
+        it[WEATHER_CITY] = name
+        it[WEATHER_LAT] = lat
+        it[WEATHER_LON] = lon
+    }
+
+    /** Clears the chosen city so weather detects location automatically (by IP) again. */
+    suspend fun clearWeatherCity() = dataStore.edit {
+        it.remove(WEATHER_CITY)
+        it.remove(WEATHER_LAT)
+        it.remove(WEATHER_LON)
+    }
+
+    suspend fun setFrameNightDim(value: Boolean) = dataStore.edit { it[FRAME_NIGHT_DIM] = value }
+    suspend fun setNowPlaying(value: Boolean) = dataStore.edit { it[NOW_PLAYING] = value }
 
     private companion object {
         val WALLPAPER_ID = intPreferencesKey("wallpaper_id")
@@ -234,5 +282,13 @@ class SettingsStore(context: Context) {
         val FRAME_MOTION = booleanPreferencesKey("frame_motion")
         val FRAME_SHUFFLE = booleanPreferencesKey("frame_shuffle")
         val USE_FRAME_WALLPAPER = booleanPreferencesKey("use_frame_wallpaper")
+        val WEATHER_ON_HOME = booleanPreferencesKey("weather_on_home")
+        val FRAME_WEATHER = booleanPreferencesKey("frame_weather")
+        val WEATHER_UNIT = stringPreferencesKey("weather_unit")
+        val WEATHER_CITY = stringPreferencesKey("weather_city")
+        val WEATHER_LAT = doublePreferencesKey("weather_lat")
+        val WEATHER_LON = doublePreferencesKey("weather_lon")
+        val FRAME_NIGHT_DIM = booleanPreferencesKey("frame_night_dim")
+        val NOW_PLAYING = booleanPreferencesKey("now_playing")
     }
 }

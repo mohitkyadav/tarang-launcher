@@ -20,6 +20,16 @@ class HomeRedirectService : AccessibilityService() {
 
     private var lastRedirectAt = 0L
 
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        instance = this
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
@@ -39,12 +49,30 @@ class HomeRedirectService : AccessibilityService() {
 
     override fun onInterrupt() = Unit
 
-    private companion object {
-        const val TAG = "HomeRedirect"
-        const val DEBOUNCE_MS = 800L
+    companion object {
+        private const val TAG = "HomeRedirect"
+        private const val DEBOUNCE_MS = 800L
+
+        /** The live service instance while it's connected, so the launcher can drive global actions
+         *  (e.g. the "Sleep" shortcut) through it. Null when the service isn't enabled/connected. */
+        @Volatile
+        var instance: HomeRedirectService? = null
+            private set
+
+        /**
+         * Best-effort "put the TV to sleep": performs the accessibility lock-screen global action,
+         * which on most Android TV devices turns the display off. Returns false if the accessibility
+         * service isn't connected (the caller can then fall back — e.g. to Frame Art).
+         */
+        fun requestSleep(): Boolean {
+            val svc = instance ?: return false
+            return runCatching {
+                svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
+            }.getOrDefault(false)
+        }
 
         /** Stock launcher packages we bounce away from. */
-        val STOCK_LAUNCHERS = setOf(
+        private val STOCK_LAUNCHERS = setOf(
             "com.google.android.apps.tv.launcherx", // Google TV (Chromecast w/ Google TV)
             "com.google.android.tvlauncher", // AOSP / older Android TV Leanback launcher
         )

@@ -19,12 +19,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -44,11 +46,16 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -71,11 +78,13 @@ import com.tarang.launcher.data.MIN_COLUMNS
 import com.tarang.launcher.data.TV_LISTINGS_PERMISSION
 import com.tarang.launcher.data.ThemeMode
 import com.tarang.launcher.data.TvArtwork
+import com.tarang.launcher.data.WeatherUnit
 import com.tarang.launcher.home.HomeSetup
 
 private enum class SettingsSection(val title: String) {
     APPEARANCE("Appearance"),
     FRAME_ART("Frame Art"),
+    WEATHER("Weather"),
     HOME_SETUP("Home setup"),
     HIDDEN_APPS("Hidden apps"),
     DIAGNOSTICS("Diagnostics"),
@@ -119,6 +128,15 @@ fun SettingsScreen(
     onFrameMotion: (Boolean) -> Unit,
     onFrameShuffle: (Boolean) -> Unit,
     onUseFrameArtWallpaper: (Boolean) -> Unit,
+    onWeatherOnHome: (Boolean) -> Unit,
+    onFrameWeather: (Boolean) -> Unit,
+    onWeatherUnit: (WeatherUnit) -> Unit,
+    onWeatherCity: (String, Double, Double) -> Unit,
+    onWeatherAuto: () -> Unit,
+    onFrameNightDim: (Boolean) -> Unit,
+    onNowPlaying: (Boolean) -> Unit,
+    onOpenScreensaverSettings: () -> Unit,
+    onOpenNotificationAccess: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onChooseHomeApp: (() -> Unit)?,
     onClose: () -> Unit,
@@ -175,6 +193,9 @@ fun SettingsScreen(
                         onReduceMotion = onReduceMotion,
                         onAnimStyle = onAnimStyle,
                         onUseFrameArtWallpaper = onUseFrameArtWallpaper,
+                        nowPlaying = settings.nowPlaying,
+                        onNowPlaying = onNowPlaying,
+                        onOpenNotificationAccess = onOpenNotificationAccess,
                     )
 
                     SettingsSection.FRAME_ART -> FrameArtPane(
@@ -200,6 +221,21 @@ fun SettingsScreen(
                         onMotion = onFrameMotion,
                         shuffle = settings.frameShuffle,
                         onShuffle = onFrameShuffle,
+                        nightDim = settings.frameNightDim,
+                        onNightDim = onFrameNightDim,
+                        onOpenScreensaver = onOpenScreensaverSettings,
+                    )
+
+                    SettingsSection.WEATHER -> WeatherPane(
+                        onHome = settings.weatherOnHome,
+                        onSetHome = onWeatherOnHome,
+                        inFrame = settings.frameWeather,
+                        onSetInFrame = onFrameWeather,
+                        unit = settings.weatherUnit,
+                        onUnit = onWeatherUnit,
+                        city = settings.weatherCity,
+                        onCity = onWeatherCity,
+                        onAuto = onWeatherAuto,
                     )
 
                     SettingsSection.HOME_SETUP -> HomeSetupPane(
@@ -277,6 +313,9 @@ private fun AppearancePane(
     onReduceMotion: (Boolean) -> Unit,
     onAnimStyle: (AnimStyle) -> Unit,
     onUseFrameArtWallpaper: (Boolean) -> Unit,
+    nowPlaying: Boolean,
+    onNowPlaying: (Boolean) -> Unit,
+    onOpenNotificationAccess: () -> Unit,
 ) {
     val thumb = rememberWallpaperThumb(settings.wallpaperImagePath)
     val imageActive = settings.useImageWallpaper
@@ -390,9 +429,64 @@ private fun AppearancePane(
             modifier = Modifier.fillMaxWidth(0.85f),
         )
 
+        NowPlayingSection(
+            enabled = nowPlaying,
+            onEnabled = onNowPlaying,
+            onOpenNotificationAccess = onOpenNotificationAccess,
+        )
+
         // Breathing room so the last section can scroll clear of the screen edge.
         Spacer(Modifier.height(44.dp))
     }
+}
+
+/**
+ * "Now playing" chip toggle. When on, needs notification access (the permission that lets us read the
+ * device's active media sessions); surfaces the live grant state + a shortcut, re-checked on resume.
+ */
+@Composable
+private fun NowPlayingSection(
+    enabled: Boolean,
+    onEnabled: (Boolean) -> Unit,
+    onOpenNotificationAccess: () -> Unit,
+) {
+    val colors = LocalLauncherColors.current
+    SectionLabel("Now playing")
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        ToggleChip("On", enabled) { onEnabled(true) }
+        ToggleChip("Off", !enabled) { onEnabled(false) }
+    }
+    Text(
+        "Shows a compact chip in the top bar with whatever's currently playing.",
+        color = colors.textDim,
+        fontSize = 13.sp,
+        modifier = Modifier.fillMaxWidth(0.85f),
+    )
+    if (enabled) {
+        val granted = rememberNotificationAccessGranted()
+        if (granted) {
+            StatusRow("Notification access", ok = true, okText = "Granted", offText = "")
+        } else {
+            Text("Needs notification access to read what's playing.", color = warningColor(colors.isDark), fontSize = 13.sp)
+            ToggleChip("Grant notification access", active = false) { onOpenNotificationAccess() }
+        }
+    }
+}
+
+/** Re-reads whether Tarang's notification listener is enabled, refreshing on each resume. */
+@Composable
+private fun rememberNotificationAccessGranted(): Boolean {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var nonce by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) nonce++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    return remember(nonce) { isNotificationAccessGranted(context) }
 }
 
 /**
@@ -425,6 +519,9 @@ private fun FrameArtPane(
     onMotion: (Boolean) -> Unit,
     shuffle: Boolean,
     onShuffle: (Boolean) -> Unit,
+    nightDim: Boolean,
+    onNightDim: (Boolean) -> Unit,
+    onOpenScreensaver: () -> Unit,
 ) {
     val colors = LocalLauncherColors.current
     Column(
@@ -560,7 +657,20 @@ private fun FrameArtPane(
                 ToggleChip("Show", showDate) { onShowDate(true) }
                 ToggleChip("Hide", !showDate) { onShowDate(false) }
             }
+
         }
+
+        SectionLabel("Dim at night")
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToggleChip("On", nightDim) { onNightDim(true) }
+            ToggleChip("Off", !nightDim) { onNightDim(false) }
+        }
+        Text(
+            "Gradually darkens the picture through the small hours so it isn't bright at 2am.",
+            color = colors.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
 
         SectionLabel("Auto-start")
         FlowRow(
@@ -582,7 +692,195 @@ private fun FrameArtPane(
             modifier = Modifier.fillMaxWidth(0.85f),
         )
 
+        SectionLabel("System screensaver")
+        ToggleChip("Set as screensaver", active = false) { onOpenScreensaver() }
+        Text(
+            "Use this same Frame Art as the TV's screensaver, so it comes on by itself when the device " +
+                "is idle. Opens the system Screensaver settings — choose Tarang there.",
+            color = colors.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
         Spacer(Modifier.height(44.dp))
+    }
+}
+
+/**
+ * Weather settings: where to show the readout (home / Frame Art), the temperature unit, and the
+ * location — automatic (by IP) or a city the user picks by name.
+ */
+@Composable
+private fun WeatherPane(
+    onHome: Boolean,
+    onSetHome: (Boolean) -> Unit,
+    inFrame: Boolean,
+    onSetInFrame: (Boolean) -> Unit,
+    unit: WeatherUnit,
+    onUnit: (WeatherUnit) -> Unit,
+    city: String?,
+    onCity: (String, Double, Double) -> Unit,
+    onAuto: () -> Unit,
+) {
+    val colors = LocalLauncherColors.current
+    var showCityPicker by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
+    ) {
+        PaneTitle("Weather")
+        Text(
+            "A quiet temperature and condition readout. Show it on the home screen, on Frame Art, or both.",
+            color = colors.textDim,
+            fontSize = 14.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
+        SectionLabel("Show on home screen")
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToggleChip("On", onHome) { onSetHome(true) }
+            ToggleChip("Off", !onHome) { onSetHome(false) }
+        }
+
+        SectionLabel("Show on Frame Art")
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToggleChip("On", inFrame) { onSetInFrame(true) }
+            ToggleChip("Off", !inFrame) { onSetInFrame(false) }
+        }
+        Text(
+            "On Frame Art it sits beside the clock, so turn the Frame Art clock on too.",
+            color = colors.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
+        SectionLabel("Units")
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToggleChip("Celsius", unit == WeatherUnit.CELSIUS) { onUnit(WeatherUnit.CELSIUS) }
+            ToggleChip("Fahrenheit", unit == WeatherUnit.FAHRENHEIT) { onUnit(WeatherUnit.FAHRENHEIT) }
+        }
+
+        SectionLabel("Location")
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToggleChip(city ?: "Choose city", active = city != null) { showCityPicker = true }
+            ToggleChip("Automatic", active = city == null) { onAuto() }
+        }
+        Text(
+            if (city == null) "Detecting your location automatically (by IP)." else "Weather for $city.",
+            color = colors.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
+        Spacer(Modifier.height(44.dp))
+    }
+
+    if (showCityPicker) {
+        CityPickerDialog(
+            onPick = { r ->
+                showCityPicker = false
+                onCity(r.label, r.lat, r.lon)
+            },
+            onDismiss = { showCityPicker = false },
+        )
+    }
+}
+
+/** A modal city search: type a name, pick from geocoded matches. Text entry uses the leanback IME. */
+@Composable
+private fun CityPickerDialog(onPick: (GeoResult) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        var query by remember { mutableStateOf("") }
+        var results by remember { mutableStateOf<List<GeoResult>>(emptyList()) }
+        var searching by remember { mutableStateOf(false) }
+        val fieldFocus = remember { FocusRequester() }
+
+        LaunchedEffect(query) {
+            if (query.isBlank()) {
+                results = emptyList()
+                return@LaunchedEffect
+            }
+            searching = true
+            delay(400) // debounce keystrokes
+            results = geocodeCity(query)
+            searching = false
+        }
+        LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.78f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .heightIn(max = 540.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFF141417))
+                    .padding(36.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text("Choose your city", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF2A2A2E))
+                        .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                ) {
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
+                        cursorBrush = SolidColor(Color.White),
+                        modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
+                    )
+                    if (query.isEmpty()) {
+                        Text("Type a city name…", color = Color.White.copy(alpha = 0.4f), fontSize = 18.sp)
+                    }
+                }
+
+                when {
+                    query.isBlank() ->
+                        Text("e.g. Berlin, Tokyo, New York", color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+                    searching && results.isEmpty() ->
+                        Text("Searching…", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+                    results.isEmpty() ->
+                        Text("No matches.", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+                    else -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        results.forEach { r -> CityRow(label = r.label) { onPick(r) } }
+                    }
+                }
+
+                Text("Press Back to cancel", color = Color.White.copy(alpha = 0.45f), fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun CityRow(label: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color(0xFF2A2A2E),
+            focusedContainerColor = Color(0xFF3A3A40),
+        ),
+    ) {
+        Text(
+            label,
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+        )
     }
 }
 

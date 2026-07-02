@@ -134,6 +134,15 @@ class LauncherViewModel(
     fun setFrameShuffle(value: Boolean) = viewModelScope.launch { settingsStore.setFrameShuffle(value) }.let {}
     fun setUseFrameArtWallpaper(value: Boolean) =
         viewModelScope.launch { settingsStore.setUseFrameArtWallpaper(value) }.let {}
+    fun setWeatherOnHome(value: Boolean) = viewModelScope.launch { settingsStore.setWeatherOnHome(value) }.let {}
+    fun setFrameWeather(value: Boolean) = viewModelScope.launch { settingsStore.setFrameWeather(value) }.let {}
+    fun setWeatherUnit(unit: com.tarang.launcher.data.WeatherUnit) =
+        viewModelScope.launch { settingsStore.setWeatherUnit(unit) }.let {}
+    fun setWeatherCity(name: String, lat: Double, lon: Double) =
+        viewModelScope.launch { settingsStore.setWeatherCity(name, lat, lon) }.let {}
+    fun clearWeatherCity() = viewModelScope.launch { settingsStore.clearWeatherCity() }.let {}
+    fun setFrameNightDim(value: Boolean) = viewModelScope.launch { settingsStore.setFrameNightDim(value) }.let {}
+    fun setNowPlaying(value: Boolean) = viewModelScope.launch { settingsStore.setNowPlaying(value) }.let {}
 
     companion object {
         private const val DEFAULT_DOCK_COUNT = 5
