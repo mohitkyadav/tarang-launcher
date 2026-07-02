@@ -5,9 +5,15 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,10 +24,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -486,6 +492,7 @@ fun LauncherScreen(
                     onOpenScreensaverSettings = { openScreensaverSettings(context) },
                     onOpenNotificationAccess = { openNotificationAccess(context) },
                     onOpenAccessibilitySettings = { HomeSetup.openAccessibilitySettings(context) },
+                    onOpenAndroidSettings = { openAndroidSettings(context) },
                     onChooseHomeApp = chooseHomeApp,
                     onClose = { showSettings = false },
                 )
@@ -510,6 +517,9 @@ fun LauncherScreen(
                             // connected, fall back to entering Frame Art as an ambient "screensaver".
                             onSleep = { if (!HomeRedirectService.requestSleep()) frameOn = true },
                             nowPlaying = nowPlaying,
+                            // Clicking the chip jumps back into whatever app is playing, with the
+                            // same launch choreography as a grid tile.
+                            onOpenNowPlaying = { pkg -> launchApp(pkg) },
                             homeWeather = if (settings.weatherOnHome) weather else null,
                             tuneFocus = tuneFocus,
                             backdrop = backdrop,
@@ -521,6 +531,7 @@ fun LauncherScreen(
                             // Full quality (edge refraction) only at rest; drop it while anything moves.
                             glassRefract = !transitioning && !frameMoving,
                             glassBlur = settings.glassBlur,
+                            reduceMotion = settings.reduceMotion,
                         )
                     }
                     // Dock + grid scale up and drop off the bottom — same choreography for frame mode and
@@ -602,43 +613,62 @@ fun LauncherScreen(
     }
 }
 
+// One chip height and one stadium shape for every top-bar element, so the bar reads as a single
+// family of chips rather than mixed widgets (the clock used to be a squarer rounded-rect).
+private val ChipHeight = 56.dp
+private val ChipShape = RoundedCornerShape(percent = 50)
+
 @Composable
 private fun TopBar(
     onOpenSettings: () -> Unit,
     onEnterFrame: () -> Unit,
     onSleep: () -> Unit,
     nowPlaying: NowPlaying?,
+    onOpenNowPlaying: (String) -> Unit,
     homeWeather: WeatherData?,
     tuneFocus: FocusRequester,
     backdrop: GraphicsLayer,
     glassLive: Boolean,
     glassRefract: Boolean,
     glassBlur: Boolean,
+    reduceMotion: Boolean,
 ) {
     val context = LocalContext.current
     val net = rememberNetStatus()
     val colors = LocalLauncherColors.current
     val tint = if (glassBlur) colors.textBackdrop else colors.textBackdropOpaque
-    Row(
+    // A healthy connection is silence: the Wi-Fi chip only appears when something needs attention
+    // (offline, or a weak Wi-Fi signal) and then click-throughs to Wi-Fi settings. Android settings
+    // moved into the launcher Settings page (Home setup), so the resting bar stays minimal.
+    val netNeedsAttention = !net.online || net.kind == NetKind.NONE ||
+        (net.kind == NetKind.WIFI && net.wifiLevel <= 1)
+    // Three anchored slots (start / centre / end) instead of SpaceBetween: the now-playing chip is
+    // centred on the SCREEN, not between the flanking groups, so it doesn't drift when the weather
+    // pill appears.
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 56.dp, end = 56.dp, top = 28.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
     ) {
         // Left group: clock + (optional) weather, kept together as their own frosted containers so text
         // stays legible over any wallpaper without scrimming the whole image.
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.align(Alignment.CenterStart),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Clock(
                 modifier = Modifier
-                    .frostedGlass(backdrop, RoundedCornerShape(18.dp), tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .height(ChipHeight)
+                    .frostedGlass(backdrop, ChipShape, tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
+                    .padding(horizontal = 20.dp),
             )
             homeWeather?.let { w ->
                 Row(
                     modifier = Modifier
-                        .frostedGlass(backdrop, RoundedCornerShape(percent = 50), tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        .height(ChipHeight)
+                        .frostedGlass(backdrop, ChipShape, tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
+                        .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -647,28 +677,42 @@ private fun TopBar(
                 }
             }
         }
-        // Centre: a compact "now playing" chip (only present while something is playing). Emits no
-        // layout node when null, so the bar keeps its plain clock↔pills spacing.
-        nowPlaying?.let {
-            NowPlayingChip(
-                nowPlaying = it,
-                backdrop = backdrop,
-                tint = tint,
-                glassLive = glassLive,
-                glassRefract = glassRefract,
-                glassBlur = glassBlur,
-            )
+        // Centre: the "now playing" chip. Retain the last snapshot while animating out so the exit
+        // doesn't collapse to an empty pill.
+        var lastNowPlaying by remember { mutableStateOf(nowPlaying) }
+        if (nowPlaying != null) lastNowPlaying = nowPlaying
+        AnimatedVisibility(
+            visible = nowPlaying != null,
+            modifier = Modifier.align(Alignment.Center),
+            enter = if (reduceMotion) fadeIn(snap()) else fadeIn(tween(300)) + scaleIn(initialScale = 0.92f, animationSpec = tween(300)),
+            exit = if (reduceMotion) fadeOut(snap()) else fadeOut(tween(200)) + scaleOut(targetScale = 0.92f, animationSpec = tween(200)),
+        ) {
+            lastNowPlaying?.let { np ->
+                NowPlayingChip(
+                    nowPlaying = np,
+                    onClick = { onOpenNowPlaying(np.packageName) },
+                    backdrop = backdrop,
+                    tint = tint,
+                    glassLive = glassLive,
+                    glassRefract = glassRefract,
+                    glassBlur = glassBlur,
+                )
+            }
         }
-        // Status pill: Wi-Fi indicator + Android settings + launcher (tune) settings.
+        // End group: quiet status + actions, icon-only.
         Row(
             modifier = Modifier
-                .frostedGlass(backdrop, RoundedCornerShape(percent = 50), tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .align(Alignment.CenterEnd)
+                .height(ChipHeight)
+                .frostedGlass(backdrop, ChipShape, tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
+                .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PillButton(onClick = { openWifiSettings(context) }, contentDescription = "Wi-Fi settings") {
-                WifiIndicator(status = net, tint = colors.text, modifier = Modifier.size(22.dp))
+            if (netNeedsAttention) {
+                PillButton(onClick = { openWifiSettings(context) }, contentDescription = "Wi-Fi settings") {
+                    WifiIndicator(status = net, tint = colors.text, modifier = Modifier.size(22.dp))
+                }
             }
             PillButton(onClick = onEnterFrame, contentDescription = "Frame Art") {
                 Image(
@@ -698,14 +742,6 @@ private fun TopBar(
                     colorFilter = ColorFilter.tint(colors.text),
                 )
             }
-            PillButton(onClick = { openAndroidSettings(context) }, contentDescription = "Android settings") {
-                Image(
-                    painterResource(R.drawable.ic_settings),
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp),
-                    colorFilter = ColorFilter.tint(colors.text),
-                )
-            }
         }
     }
 }
@@ -724,7 +760,7 @@ private fun PillButton(
         modifier = modifier
             .size(40.dp)
             .semantics { this.contentDescription = contentDescription },
-        shape = ClickableSurfaceDefaults.shape(CircleShape),
+        shape = ClickableSurfaceDefaults.shape(ChipShape),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color.Transparent,
@@ -735,10 +771,12 @@ private fun PillButton(
     }
 }
 
-/** A compact frosted "now playing" chip: album art + track title (artist if room). Display-only. */
+/** A compact frosted "now playing" chip: album art + track title (artist if room). Click opens the app. */
+@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 private fun NowPlayingChip(
     nowPlaying: NowPlaying,
+    onClick: () -> Unit,
     backdrop: GraphicsLayer,
     tint: Color,
     glassLive: Boolean,
@@ -746,32 +784,46 @@ private fun NowPlayingChip(
     glassBlur: Boolean,
 ) {
     val colors = LocalLauncherColors.current
-    Row(
+    Surface(
+        onClick = onClick,
         modifier = Modifier
-            .widthIn(max = 320.dp)
-            .frostedGlass(backdrop, RoundedCornerShape(percent = 50), tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .height(ChipHeight)
+            .frostedGlass(backdrop, ChipShape, tint = tint, live = glassLive, refract = glassRefract, blur = glassBlur)
+            .semantics { contentDescription = "Now playing: ${nowPlaying.title}. Open app" },
+        shape = ClickableSurfaceDefaults.shape(ChipShape),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            focusedContainerColor = colors.text.copy(alpha = 0.14f),
+        ),
     ) {
-        nowPlaying.art?.let { art ->
-            Image(
-                bitmap = art,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)),
-            )
-        }
-        Column {
-            Text(
-                text = nowPlaying.title,
-                color = colors.text,
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            nowPlaying.artist?.let {
-                Text(text = it, color = colors.textDim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .height(ChipHeight)
+                .padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            nowPlaying.art?.let { art ->
+                Image(
+                    bitmap = art,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)),
+                )
+            }
+            Column {
+                Text(
+                    text = nowPlaying.title,
+                    color = colors.text,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                nowPlaying.artist?.let {
+                    Text(text = it, color = colors.textDim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }

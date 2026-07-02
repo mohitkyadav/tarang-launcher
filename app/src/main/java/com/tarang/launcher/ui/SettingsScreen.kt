@@ -138,6 +138,7 @@ fun SettingsScreen(
     onOpenScreensaverSettings: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
+    onOpenAndroidSettings: () -> Unit,
     onChooseHomeApp: (() -> Unit)?,
     onClose: () -> Unit,
 ) {
@@ -241,6 +242,7 @@ fun SettingsScreen(
                     SettingsSection.HOME_SETUP -> HomeSetupPane(
                         onOpenAccessibility = onOpenAccessibilitySettings,
                         onChooseHome = onChooseHomeApp,
+                        onOpenAndroidSettings = onOpenAndroidSettings,
                     )
 
                     SettingsSection.HIDDEN_APPS -> HiddenAppsPane(
@@ -1011,6 +1013,7 @@ private fun artworkDetail(art: AppArtwork?): String {
 private fun HomeSetupPane(
     onOpenAccessibility: () -> Unit,
     onChooseHome: (() -> Unit)?,
+    onOpenAndroidSettings: () -> Unit,
 ) {
     val colors = LocalLauncherColors.current
     val status = rememberHomeSetupStatus()
@@ -1053,6 +1056,10 @@ private fun HomeSetupPane(
                 modifier = Modifier.fillMaxWidth(0.8f),
             )
         }
+
+        // The system settings entry lives here (not in the top bar) to keep the resting bar minimal.
+        SectionLabel("System")
+        ToggleChip("Open Android settings", active = false) { onOpenAndroidSettings() }
 
         Spacer(Modifier.height(44.dp))
     }
