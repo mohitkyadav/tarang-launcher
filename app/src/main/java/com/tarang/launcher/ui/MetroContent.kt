@@ -38,7 +38,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -52,13 +51,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,6 +69,7 @@ import com.tarang.launcher.R
 import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
 import com.tarang.launcher.data.MetroTile
+import com.tarang.launcher.data.TileArt
 import com.tarang.launcher.data.TvArtwork
 import kotlinx.coroutines.delay
 import kotlin.math.abs
@@ -350,11 +348,12 @@ private fun MetroColumn(
     }
 
     @Composable
-    fun tile(app: AppInfo, width: Dp, up: FocusRequester?, isBoardFirst: Boolean, posters: List<String>) {
+    fun tile(app: AppInfo, width: Dp, up: FocusRequester?, isBoardFirst: Boolean, isWide: Boolean, posters: List<String>) {
         MetroCard(
             app = app,
             iconLoader = iconLoader,
             posters = posters,
+            isWide = isWide,
             width = width,
             height = tileHeight,
             onFocused = { onAppFocused(app.packageName) },
@@ -372,11 +371,11 @@ private fun MetroColumn(
             val up = if (slotPos == 0) topFocusRequester else null
             val firstHere = isFirstColumn && slotPos == 0
             when (slot) {
-                // Only WIDE tiles rotate posters; squares always show icon-on-color.
-                is MetroSlot.Wide -> tile(slot.app, wideWidth, up, firstHere, postersByApp[slot.app.packageName].orEmpty())
+                // Wide tiles show the app banner (and rotate posters); squares show icon-on-color.
+                is MetroSlot.Wide -> tile(slot.app, wideWidth, up, firstHere, true, postersByApp[slot.app.packageName].orEmpty())
                 is MetroSlot.Squares -> Row(horizontalArrangement = Arrangement.spacedBy(MetroGap)) {
-                    tile(slot.a, tileHeight, up, firstHere, emptyList())
-                    slot.b?.let { tile(it, tileHeight, up, false, emptyList()) }
+                    tile(slot.a, tileHeight, up, firstHere, false, emptyList())
+                    slot.b?.let { tile(it, tileHeight, up, false, false, emptyList()) }
                 }
             }
         }
@@ -384,11 +383,11 @@ private fun MetroColumn(
 }
 
 /**
- * One Metro tile: a flat, sharp-cornered [width]×[height] rectangle in the app's accent color, with
- * the icon centered and the label in the bottom-left. Wide tiles are 2:1; squares are 1:1. The text
- * color flips with the tile's luminance so it stays legible on any accent. On focus the tile scales up
- * a touch and gains a white outline. Long-press opens the resize/manage menu. [layer] carries the
- * entrance/launch slide; it composes on top of the focus scale.
+ * One Metro tile, sharp-cornered [width]×[height]. A WIDE tile shows the app's banner full-bleed — the
+ * same artwork the stock TV launcher shows (logo on the app's white/brand backdrop) — with no label. A
+ * banner-less app, and every SQUARE tile, shows the app icon centered on the icon's own edge color. On
+ * focus the tile scales up a touch and gains a white outline. Long-press opens the resize/manage menu.
+ * [layer] carries the entrance/launch slide; it composes on top of the focus scale.
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -396,6 +395,7 @@ private fun MetroCard(
     app: AppInfo,
     iconLoader: IconLoader,
     posters: List<String>,
+    isWide: Boolean,
     width: Dp,
     height: Dp,
     onFocused: () -> Unit,
@@ -405,9 +405,7 @@ private fun MetroCard(
     layer: GraphicsLayerScope.() -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val tile by produceState<MetroTile?>(initialValue = null, app.packageName) {
-        value = iconLoader.loadMetroTile(app)
-    }
+    val colors = LocalLauncherColors.current
     val showPosters = posters.isNotEmpty()
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -415,10 +413,6 @@ private fun MetroCard(
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
         label = "metroScale",
     )
-
-    val colors = LocalLauncherColors.current
-    val tileColor = tile?.color ?: colors.chip
-    val onTile = if (tileColor.luminance() > 0.5f) Color.Black else Color.White
 
     Surface(
         onClick = onClick,
@@ -441,49 +435,53 @@ private fun MetroCard(
         shape = ClickableSurfaceDefaults.shape(RectangleShape),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = tileColor,
-            focusedContainerColor = tileColor,
+            containerColor = colors.chip,
+            focusedContainerColor = colors.chip,
         ),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Icon-on-color base (also the fallback if posters are still loading / fail). Nudged up a
-            // touch so it reads centred in the space ABOVE the bottom-left label rather than the whole
-            // tile, and sized for a bit more presence.
-            tile?.icon?.let {
-                Image(
-                    bitmap = it,
-                    contentDescription = app.label,
-                    modifier = Modifier.align(BiasAlignment(0f, -0.18f)).size(height * 0.5f),
-                )
+            if (isWide) {
+                // Wide: the app banner full-bleed (stock-launcher look). Reuses the tvOS tile cache.
+                val art by produceState<TileArt?>(initialValue = null, app.packageName) {
+                    value = iconLoader.loadTile(app)
+                }
+                when (val a = art) {
+                    is TileArt.Banner -> Image(
+                        bitmap = a.image,
+                        contentDescription = app.label,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    is TileArt.Fallback -> IconFace(a.icon, a.color, height, app.label)
+                    null -> Unit
+                }
+            } else {
+                // Square: the app icon centered on the icon's own edge color.
+                val metro by produceState<MetroTile?>(initialValue = null, app.packageName) {
+                    value = iconLoader.loadMetroTile(app)
+                }
+                IconFace(metro?.icon, metro?.color ?: colors.chip, height, app.label)
             }
-            // Wide TV-content tiles rotate their posters full-bleed over the base.
+            // Wide TV-content tiles rotate their posters full-bleed over the base (real TV only).
             if (showPosters) {
                 val reqW = with(LocalDensity.current) { width.roundToPx() }
                 val reqH = with(LocalDensity.current) { height.roundToPx() }
                 MetroPosterFace(app.packageName, posters, reqW, reqH)
-                // Bottom scrim so the label stays legible over the artwork.
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                0.55f to Color.Transparent,
-                                1f to Color.Black.copy(alpha = 0.65f),
-                            ),
-                        ),
-                )
             }
-            Text(
-                text = app.label,
-                color = if (showPosters) Color.White else onTile,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+        }
+    }
+}
+
+/** The app icon centered on a flat [color] (fills any masked/transparent margins so it blends). */
+@Composable
+private fun IconFace(icon: ImageBitmap?, color: Color, height: Dp, label: String) {
+    Box(modifier = Modifier.fillMaxSize().background(color), contentAlignment = Alignment.Center) {
+        icon?.let {
+            Image(
+                bitmap = it,
+                contentDescription = label,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(height * 0.58f),
             )
         }
     }

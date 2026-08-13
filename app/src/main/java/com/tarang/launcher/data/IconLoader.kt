@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.util.LruCache
 import androidx.compose.ui.graphics.Color
@@ -97,25 +96,43 @@ class IconLoader(context: Context) {
         val stamp = packageStamp(app.packageName)
         val icon = resolveIcon(app)
         val bmp = icon?.toBitmap(METRO_ICON_PX, METRO_ICON_PX)
-        val color = icon?.let { metroTileColor(it) } ?: DEFAULT_TILE_ARGB
+        val color = metroTileColor(bmp)
         persistMetro(app.packageName, bmp, DiskTile(banner = false, color = color, stamp = stamp))
         return MetroTile(bmp?.asImageBitmap(), Color(color))
     }
 
     /**
-     * The tile-background color for a Metro tile: the icon designer's own background, so the tile reads
-     * like the app instead of an over-saturated accent. Prefers an adaptive icon's background layer
-     * (brand color for streaming apps; white for Play Store / YouTube-style icons), and otherwise the
-     * icon's dominant (most-common) color rather than its most vibrant one.
+     * The background color for a SQUARE Metro tile: the icon's own edge (background) color, so the full
+     * icon shown on top blends into it (no mismatched plate). Falls back to the icon's dominant color.
      */
-    private fun metroTileColor(drawable: Drawable): Int {
-        (drawable as? AdaptiveIconDrawable)?.background?.let { bg ->
-            val bmp = bg.toBitmap(PALETTE_PX, PALETTE_PX)
-            Palette.from(bmp).generate().dominantSwatch?.rgb?.let { return it }
+    private fun metroTileColor(iconBmp: Bitmap?): Int {
+        iconBmp ?: return DEFAULT_TILE_ARGB
+        edgeColor(iconBmp)?.let { return it }
+        val p = Palette.from(iconBmp).generate()
+        return (p.dominantSwatch ?: p.vibrantSwatch ?: p.mutedSwatch)?.rgb ?: DEFAULT_TILE_ARGB
+    }
+
+    /** Average of the bitmap's edge pixels (its background), ignoring transparent ones; null if none. */
+    private fun edgeColor(bmp: Bitmap): Int? {
+        val w = bmp.width
+        val h = bmp.height
+        if (w < 4 || h < 4) return null
+        val samples = intArrayOf(
+            bmp.getPixel(1, 1), bmp.getPixel(w - 2, 1), bmp.getPixel(1, h - 2), bmp.getPixel(w - 2, h - 2),
+            bmp.getPixel(w / 2, 1), bmp.getPixel(w / 2, h - 2), bmp.getPixel(1, h / 2), bmp.getPixel(w - 2, h / 2),
+        )
+        var r = 0
+        var g = 0
+        var b = 0
+        var n = 0
+        for (c in samples) {
+            if (android.graphics.Color.alpha(c) < 200) continue
+            r += android.graphics.Color.red(c)
+            g += android.graphics.Color.green(c)
+            b += android.graphics.Color.blue(c)
+            n++
         }
-        val bmp = drawable.toBitmap(PALETTE_PX, PALETTE_PX)
-        val palette = Palette.from(bmp).generate()
-        return (palette.dominantSwatch ?: palette.vibrantSwatch ?: palette.mutedSwatch)?.rgb ?: DEFAULT_TILE_ARGB
+        return if (n == 0) null else android.graphics.Color.rgb(r / n, g / n, b / n)
     }
 
     private fun persistMetro(pkg: String, bmp: Bitmap?, entry: DiskTile) {
@@ -248,8 +265,8 @@ class IconLoader(context: Context) {
         const val ICON_PX = 144
         const val METRO_ICON_PX = 192 // crisp on a 1080p TV tile
         // Disk-index key prefix; keeps Metro art off the tvOS tile. Bump the suffix to invalidate old
-        // cached entries after changing how the tile color is derived (v2 = icon-background color).
-        const val METRO_PREFIX = "metro2:"
+        // cached entries after changing how the tile color/logo is derived (v4 = full icon + edge color).
+        const val METRO_PREFIX = "metro4:"
         const val PALETTE_PX = 64
         const val UNKNOWN_STAMP = -1L
         val DEFAULT_TILE_ARGB = 0xFF2A2A2C.toInt()
