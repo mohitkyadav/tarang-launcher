@@ -155,6 +155,8 @@ class LauncherViewModel(
     fun setColumns(n: Int) = viewModelScope.launch { settingsStore.setColumns(n) }.let {}
     fun setLauncherStyle(style: com.tarang.launcher.data.LauncherStyle) =
         viewModelScope.launch { settingsStore.setLauncherStyle(style) }.let {}
+    fun setMetroTileSquare(packageName: String, square: Boolean) =
+        viewModelScope.launch { settingsStore.setMetroTileSquare(packageName, square) }.let {}
     fun setImageWallpaper(path: String) = viewModelScope.launch { settingsStore.setImageWallpaper(path) }.let {}
     fun setUseImageWallpaper(value: Boolean) = viewModelScope.launch { settingsStore.setUseImageWallpaper(value) }.let {}
     fun setUseAppArtwork(value: Boolean) = viewModelScope.launch { settingsStore.setUseAppArtwork(value) }.let {}

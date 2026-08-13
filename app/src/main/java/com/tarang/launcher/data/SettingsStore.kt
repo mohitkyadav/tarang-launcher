@@ -77,6 +77,8 @@ data class LauncherSettings(
     val columns: Int = DEFAULT_COLUMNS,
     /** The home-screen look and feel (tvOS banner cards vs. Windows Metro live tiles). */
     val launcherStyle: LauncherStyle = LauncherStyle.TVOS,
+    /** Packages the user set to a SQUARE Metro tile. Everything else defaults to a wide tile. */
+    val metroSquareApps: Set<String> = emptySet(),
     /** When true (and [wallpaperImagePath] resolves) the photo is shown instead of a gradient. */
     val useImageWallpaper: Boolean = false,
     /** Absolute path to the user's chosen wallpaper, copied into app storage. */
@@ -148,6 +150,7 @@ class SettingsStore(context: Context) {
             columns = (p[COLUMNS] ?: DEFAULT_COLUMNS).coerceIn(MIN_COLUMNS, MAX_COLUMNS),
             launcherStyle = runCatching { LauncherStyle.valueOf(p[LAUNCHER_STYLE] ?: "TVOS") }
                 .getOrDefault(LauncherStyle.TVOS),
+            metroSquareApps = p[METRO_SQUARE_APPS] ?: emptySet(),
             useImageWallpaper = p[USE_IMAGE] ?: false,
             wallpaperImagePath = p[IMAGE_PATH],
             useAppArtwork = p[USE_APP_ARTWORK] ?: false,
@@ -195,6 +198,12 @@ class SettingsStore(context: Context) {
     suspend fun setGlassBlur(value: Boolean) = dataStore.edit { it[GLASS_BLUR] = value }
     suspend fun setColumns(n: Int) = dataStore.edit { it[COLUMNS] = n.coerceIn(MIN_COLUMNS, MAX_COLUMNS) }
     suspend fun setLauncherStyle(style: LauncherStyle) = dataStore.edit { it[LAUNCHER_STYLE] = style.name }
+
+    /** Sets one package's Metro tile to square (true) or back to the default wide (false). */
+    suspend fun setMetroTileSquare(packageName: String, square: Boolean) = dataStore.edit { p ->
+        val current = p[METRO_SQUARE_APPS] ?: emptySet()
+        p[METRO_SQUARE_APPS] = if (square) current + packageName else current - packageName
+    }
 
     /** Records a freshly picked photo and makes it the active wallpaper. */
     suspend fun setImageWallpaper(path: String) = dataStore.edit {
@@ -272,6 +281,7 @@ class SettingsStore(context: Context) {
         val GLASS_BLUR = booleanPreferencesKey("glass_blur")
         val COLUMNS = intPreferencesKey("columns")
         val LAUNCHER_STYLE = stringPreferencesKey("launcher_style")
+        val METRO_SQUARE_APPS = stringSetPreferencesKey("metro_square_apps")
         val USE_IMAGE = booleanPreferencesKey("use_image_wallpaper")
         val IMAGE_PATH = stringPreferencesKey("wallpaper_image_path")
         val USE_APP_ARTWORK = booleanPreferencesKey("use_app_artwork")

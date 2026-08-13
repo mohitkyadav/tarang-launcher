@@ -635,10 +635,16 @@ fun LauncherScreen(
                         else -> MetroHome(
                             favorites = uiState.dockApps,
                             others = visibleGrid,
+                            squareApps = settings.metroSquareApps,
                             iconLoader = container.iconLoader,
                             launchProgress = { metroLaunch.value },
                             onAppFocused = viewModel::onAppFocused,
                             onAppClicked = { pkg -> launchApp(pkg) },
+                            onSetTileSquare = viewModel::setMetroTileSquare,
+                            onToggleFavorite = viewModel::toggleFavorite,
+                            onHideApp = { viewModel.setAppHidden(it, true) },
+                            onAppInfo = { viewModel.openAppInfo(it) },
+                            onUninstall = { viewModel.uninstallApp(it) },
                             topFocusRequester = tuneFocus,
                             topBar = {
                                 Box(

@@ -102,7 +102,7 @@ fun AppContextMenu(
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-private fun MenuRow(iconRes: Int, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun MenuRow(iconRes: Int, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val colors = LocalLauncherColors.current
     val tint = if (focused) colors.onHighlight else colors.text
