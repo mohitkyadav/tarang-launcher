@@ -652,17 +652,10 @@ fun LauncherScreen(
                                         .fillMaxWidth()
                                         .graphicsLayer { alpha = (1f - topBarLaunch.value).coerceIn(0f, 1f) },
                                 ) {
-                                    TopBar(
+                                    MetroHeader(
                                         onOpenSettings = { sounds.click(); showSettings = true },
                                         onEnterFrame = { sounds.click(); frameOn = true },
-                                        nowPlaying = nowPlaying,
-                                        onOpenNowPlaying = { pkg -> launchApp(pkg) },
-                                        homeWeather = if (settings.weatherOnHome) weather else null,
                                         tuneFocus = tuneFocus,
-                                        backdrop = backdrop,
-                                        glassLive = !transitioning && !frameMoving,
-                                        glassRefract = !transitioning && !frameMoving,
-                                        glassBlur = settings.glassBlur,
                                     )
                                 }
                             },

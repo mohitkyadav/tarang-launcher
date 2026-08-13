@@ -49,11 +49,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -76,6 +78,12 @@ import kotlin.math.abs
 private val MetroSidePad = 64.dp // horizontal screen margin (also the space kept past the first/last tile)
 private val MetroGap = 12.dp // tight gap between tiles (the dense Metro look)
 private val MetroGutter = 44.dp // the vertical channel between the favorites group and the rest
+
+// The Metro Start screen has its own solid dark canvas (a deep navy, subtly graded) — it does NOT show
+// the wallpaper, so the colored tiles pop the way they do in Windows 8. Metro is always dark, whatever
+// the app theme, so the whole surface runs on the dark color tokens.
+private val MetroCanvasTop = Color(0xFF17233B)
+private val MetroCanvasBottom = Color(0xFF0A0F1A)
 // Tiles per column (the vertical count). The tile SIZE is the board height / [MetroSizeDivisor], so with
 // a divisor of 4 the tiles keep the "4-up" size, but only 3 pack per column — the leftover vertical
 // space becomes a comfortable margin above/below the grid (a clear gap under the clock). The screen is
@@ -173,15 +181,16 @@ fun MetroHome(
     LaunchedEffect(Unit) { appear.animateTo(0f, metroAppearSpec()) }
     val appearProgress = remember { { appear.value } }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        // The dark backdrop over the wallpaper (behind the tiles). It rests at full while the Start
-        // screen is home and fades in as the board returns; it clears as an app takes the front.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { alpha = metroOverlayAlpha(maxOf(launchProgress(), appearProgress())) }
-                .background(Color.Black),
-        )
+    // Metro is always a dark surface (its own canvas, not the wallpaper), so run the whole thing on the
+    // dark color tokens whatever the app's light/dark theme.
+    CompositionLocalProvider(LocalLauncherColors provides DarkLauncherColors) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            // The Metro canvas: a solid deep-navy gradient. The wallpaper does not show through, so the
+            // colored tiles pop the way they do on Windows 8.
+            .background(Brush.verticalGradient(listOf(MetroCanvasTop, MetroCanvasBottom))),
+    ) {
         Column(modifier = Modifier.fillMaxSize()) {
             topBar()
             BoxWithConstraints(
@@ -295,6 +304,7 @@ fun MetroHome(
 
     LaunchedEffect(favorites.firstOrNull()?.packageName, others.firstOrNull()?.packageName) {
         if (flatSize > 0) runCatching { firstCard.requestFocus() }
+    }
     }
 }
 
@@ -502,6 +512,67 @@ private fun MetroPosterFace(packageName: String, posters: List<String>, reqW: In
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/**
+ * The Metro header: the clock on the left, and the Frame Art / settings buttons in the top-right
+ * corner. No frosted glass — it sits on the solid dark canvas. The settings button carries [tuneFocus]
+ * so D-pad UP from the top tile row lands on it.
+ */
+@Composable
+fun MetroHeader(
+    onOpenSettings: () -> Unit,
+    onEnterFrame: () -> Unit,
+    tuneFocus: FocusRequester,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = MetroSidePad, end = MetroSidePad, top = 28.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Clock()
+        Spacer(Modifier.weight(1f))
+        MetroHeaderButton(R.drawable.ic_frame, "Frame Art", onClick = onEnterFrame)
+        MetroHeaderButton(
+            R.drawable.ic_tune,
+            "Launcher settings",
+            modifier = Modifier.focusRequester(tuneFocus),
+            onClick = onOpenSettings,
+        )
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun MetroHeaderButton(
+    iconRes: Int,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val colors = LocalLauncherColors.current
+    Surface(
+        onClick = onClick,
+        modifier = modifier.size(44.dp),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(percent = 50)),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.12f),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            focusedContainerColor = colors.text.copy(alpha = 0.22f),
+        ),
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Image(
+                painter = painterResource(iconRes),
+                contentDescription = contentDescription,
+                modifier = Modifier.size(22.dp),
+                colorFilter = ColorFilter.tint(colors.text),
             )
         }
     }

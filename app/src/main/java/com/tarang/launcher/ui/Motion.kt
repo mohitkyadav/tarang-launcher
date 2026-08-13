@@ -250,8 +250,6 @@ private const val METRO_STAGGER = 0.5f
 private const val METRO_SLIDE = 1.0f
 // How small a tile starts before it scales up to 1 as it settles.
 private const val METRO_START_SCALE = 0.8f
-// The dark backdrop's opacity while the Start screen rests (it clears to 0 as an app takes the front).
-private const val METRO_OVERLAY_MAX = 0.4f
 
 /**
  * A tile's "goneness" (0 = resting in place, 1 = fully slid off to the right and faded out) for a tile
@@ -276,7 +274,3 @@ fun GraphicsLayerScope.applyMetroSlide(gone: Float) {
 /** The whole board's scale for the given [gone] value: it grows from [METRO_START_SCALE] to 1 as one
  *  group (applied to the board container, not per tile). */
 fun metroGroupScale(gone: Float): Float = 1f - (1f - METRO_START_SCALE) * gone.coerceIn(0f, 1f)
-
-/** The dark backdrop opacity, given how "gone" the board is (0 = resting → full backdrop; 1 = an app is
- *  in front → clear). So the backdrop fades IN as the Start screen returns and rests behind the tiles. */
-fun metroOverlayAlpha(gone: Float): Float = METRO_OVERLAY_MAX * (1f - gone.coerceIn(0f, 1f))
