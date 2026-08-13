@@ -1,8 +1,10 @@
 package com.tarang.launcher.ui
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -30,7 +32,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,11 +44,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +69,9 @@ import com.tarang.launcher.R
 import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
 import com.tarang.launcher.data.MetroTile
+import com.tarang.launcher.data.TvArtwork
+import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 private val MetroSidePad = 64.dp // horizontal screen margin (also the space kept past the first/last tile)
 private val MetroGap = 12.dp // tight gap between tiles (the dense Metro look)
@@ -71,6 +82,11 @@ private val MetroGutter = 44.dp // the vertical channel between the favorites gr
 // 1080p (960×540 dp) on both the emulator and the TV, so this is identical on the real device.
 private const val MetroRows = 3
 private const val MetroSizeDivisor = 4
+
+// Live-tile poster rotation (a wide tile whose app publishes TV preview-program posters).
+private const val POSTER_DWELL_MS = 7000L // how long each poster shows
+private const val POSTER_FADE_MS = 700 // cross-fade between posters
+private const val POSTER_STAGGER_STEP_MS = 900L // per-tile start offset, so tiles don't flip in unison
 
 /**
  * One placed item in a board column. A [Wide] tile fills the whole column width; a [Squares] slot holds
@@ -137,6 +153,13 @@ fun MetroHome(
     val firstCard = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val density = LocalDensity.current
+    val context = LocalContext.current
+
+    // Poster URIs per package (one provider scan), for the wide live tiles. Empty until loaded, when an
+    // app publishes none, or when READ_TV_LISTINGS isn't granted — those tiles just show icon-on-color.
+    val postersByApp by produceState(emptyMap<String, List<String>>()) {
+        value = TvArtwork.postersByPackage(context)
+    }
 
     // Long-press menu target (resize / manage). Null when the menu is closed.
     var menuApp by remember { mutableStateOf<AppInfo?>(null) }
@@ -213,6 +236,7 @@ fun MetroHome(
                             MetroColumn(
                                 slots = col,
                                 iconLoader = iconLoader,
+                                postersByApp = postersByApp,
                                 wideWidth = wideWidth,
                                 tileHeight = tileHeight,
                                 absoluteCol = ci,
@@ -234,6 +258,7 @@ fun MetroHome(
                             MetroColumn(
                                 slots = col,
                                 iconLoader = iconLoader,
+                                postersByApp = postersByApp,
                                 wideWidth = wideWidth,
                                 tileHeight = tileHeight,
                                 absoluteCol = favCols.size + ci,
@@ -284,6 +309,7 @@ private fun List<MetroSlot>.slotKey(): String = when (val s = first()) {
 private fun MetroColumn(
     slots: List<MetroSlot>,
     iconLoader: IconLoader,
+    postersByApp: Map<String, List<String>>,
     wideWidth: Dp,
     tileHeight: Dp,
     absoluteCol: Int,
@@ -307,10 +333,11 @@ private fun MetroColumn(
     }
 
     @Composable
-    fun tile(app: AppInfo, width: Dp, up: FocusRequester?, isBoardFirst: Boolean) {
+    fun tile(app: AppInfo, width: Dp, up: FocusRequester?, isBoardFirst: Boolean, posters: List<String>) {
         MetroCard(
             app = app,
             iconLoader = iconLoader,
+            posters = posters,
             width = width,
             height = tileHeight,
             onFocused = { onAppFocused(app.packageName) },
@@ -328,10 +355,11 @@ private fun MetroColumn(
             val up = if (slotPos == 0) topFocusRequester else null
             val firstHere = isFirstColumn && slotPos == 0
             when (slot) {
-                is MetroSlot.Wide -> tile(slot.app, wideWidth, up, firstHere)
+                // Only WIDE tiles rotate posters; squares always show icon-on-color.
+                is MetroSlot.Wide -> tile(slot.app, wideWidth, up, firstHere, postersByApp[slot.app.packageName].orEmpty())
                 is MetroSlot.Squares -> Row(horizontalArrangement = Arrangement.spacedBy(MetroGap)) {
-                    tile(slot.a, tileHeight, up, firstHere)
-                    slot.b?.let { tile(it, tileHeight, up, false) }
+                    tile(slot.a, tileHeight, up, firstHere, emptyList())
+                    slot.b?.let { tile(it, tileHeight, up, false, emptyList()) }
                 }
             }
         }
@@ -350,6 +378,7 @@ private fun MetroColumn(
 private fun MetroCard(
     app: AppInfo,
     iconLoader: IconLoader,
+    posters: List<String>,
     width: Dp,
     height: Dp,
     onFocused: () -> Unit,
@@ -359,9 +388,10 @@ private fun MetroCard(
     layer: GraphicsLayerScope.() -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val tile by androidx.compose.runtime.produceState<MetroTile?>(initialValue = null, app.packageName) {
+    val tile by produceState<MetroTile?>(initialValue = null, app.packageName) {
         value = iconLoader.loadMetroTile(app)
     }
+    val showPosters = posters.isNotEmpty()
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (focused) 1.06f else 1f,
@@ -398,7 +428,8 @@ private fun MetroCard(
             focusedContainerColor = tileColor,
         ),
     ) {
-        Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Icon-on-color base (also the fallback if posters are still loading / fail).
             tile?.icon?.let {
                 Image(
                     bitmap = it,
@@ -406,14 +437,71 @@ private fun MetroCard(
                     modifier = Modifier.align(Alignment.Center).size(height * 0.42f),
                 )
             }
+            // Wide TV-content tiles rotate their posters full-bleed over the base.
+            if (showPosters) {
+                val reqW = with(LocalDensity.current) { width.roundToPx() }
+                val reqH = with(LocalDensity.current) { height.roundToPx() }
+                MetroPosterFace(app.packageName, posters, reqW, reqH)
+                // Bottom scrim so the label stays legible over the artwork.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.55f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = 0.65f),
+                            ),
+                        ),
+                )
+            }
             Text(
                 text = app.label,
-                color = onTile,
+                color = if (showPosters) Color.White else onTile,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The rotating poster face for a wide live tile: cross-fades through the app's [posters] (order
+ * randomized per tile) like a Windows 8 live tile. Only the current poster is decoded (down-sampled to
+ * the tile), the timer runs only while on-screen, and per-tile stagger keeps tiles from flipping in
+ * unison. Renders nothing until the first poster decodes (the icon base shows through).
+ */
+@Composable
+private fun MetroPosterFace(packageName: String, posters: List<String>, reqW: Int, reqH: Int) {
+    val context = LocalContext.current
+    // Randomize per tile (stable across recompositions).
+    val order = remember(packageName, posters) { posters.shuffled() }
+    var index by remember(packageName) { mutableIntStateOf(0) }
+    if (order.size > 1) {
+        RunWhileStarted(packageName, order.size) {
+            delay(POSTER_STAGGER_STEP_MS * (abs(packageName.hashCode()) % 6))
+            while (true) {
+                delay(POSTER_DWELL_MS)
+                index = (index + 1) % order.size
+            }
+        }
+    }
+    // Keep the previous poster until the next decodes (no black flash).
+    val image by produceState<ImageBitmap?>(initialValue = null, packageName, index) {
+        value = ArtworkLoader.load(context, order[index % order.size], reqW, reqH) ?: value
+    }
+    Crossfade(targetState = image, animationSpec = tween(POSTER_FADE_MS), label = "metroPoster") { img ->
+        if (img != null) {
+            Image(
+                bitmap = img,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }

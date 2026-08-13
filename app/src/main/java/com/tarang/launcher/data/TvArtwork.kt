@@ -79,6 +79,35 @@ object TvArtwork {
             out.toList()
         }
 
+    /**
+     * All preview-program poster URIs, grouped by package (one scan, distinct + capped per app). Used
+     * by the Metro live tiles so every wide tile gets its posters without re-scanning the provider per
+     * tile. Only posters (the preview-program artwork) — never the Watch Next / "continue watching" row.
+     */
+    suspend fun postersByPackage(context: Context, limitPerApp: Int = 24): Map<String, List<String>> =
+        withContext(Dispatchers.IO) {
+            if (!granted(context)) return@withContext emptyMap()
+            val out = LinkedHashMap<String, LinkedHashSet<String>>()
+            runCatching {
+                context.contentResolver.query(
+                    PREVIEW,
+                    arrayOf("package_name", "poster_art_uri"),
+                    null, null, null,
+                )?.use { c ->
+                    val pi = c.getColumnIndex("package_name")
+                    val poi = c.getColumnIndex("poster_art_uri")
+                    while (c.moveToNext()) {
+                        val pkg = pi.takeIf { it >= 0 }?.let { c.getString(it) } ?: continue
+                        val uri = poi.takeIf { it >= 0 }?.let { c.getString(it) }
+                        if (uri.isNullOrBlank()) continue
+                        val set = out.getOrPut(pkg) { LinkedHashSet() }
+                        if (set.size < limitPerApp) set.add(uri)
+                    }
+                }
+            }
+            out.mapValues { it.value.toList() }
+        }
+
     /** The system "Watch Next" (continue watching) entries, most-recently-engaged first. */
     suspend fun watchNext(context: Context): List<WatchNextItem> = withContext(Dispatchers.IO) {
         if (!granted(context)) return@withContext emptyList()
