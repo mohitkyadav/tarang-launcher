@@ -264,10 +264,12 @@ fun metroGone(p: Float, col: Int, maxCol: Int): Float {
 }
 
 /** Applies a tile's slide-in-from-the-right for the given [gone] value: it slides in along X and fades
- *  in. The scale is NOT here — the whole board scales as one group (see [metroGroupScale]). MULTIPLIES
- *  into the tile's own layer, so it composes with the focus scale. */
-fun GraphicsLayerScope.applyMetroSlide(gone: Float) {
-    translationX += gone * METRO_SLIDE * size.width
+ *  in. [refWidthPx] is a SHARED reference width (the wide-tile width), so every tile — wide or square —
+ *  slides the same absolute distance and the columns stay aligned through the wave. The scale is NOT
+ *  here — the whole board scales as one group (see [metroGroupScale]). MULTIPLIES into the tile's own
+ *  layer, so it composes with the focus scale. */
+fun GraphicsLayerScope.applyMetroSlide(gone: Float, refWidthPx: Float) {
+    translationX += gone * METRO_SLIDE * refWidthPx
     alpha *= 1f - gone
 }
 

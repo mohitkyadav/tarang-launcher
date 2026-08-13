@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.util.LruCache
 import androidx.compose.ui.graphics.Color
@@ -96,9 +97,25 @@ class IconLoader(context: Context) {
         val stamp = packageStamp(app.packageName)
         val icon = resolveIcon(app)
         val bmp = icon?.toBitmap(METRO_ICON_PX, METRO_ICON_PX)
-        val color = icon?.let { colorFromDrawable(it) } ?: DEFAULT_TILE_ARGB
+        val color = icon?.let { metroTileColor(it) } ?: DEFAULT_TILE_ARGB
         persistMetro(app.packageName, bmp, DiskTile(banner = false, color = color, stamp = stamp))
         return MetroTile(bmp?.asImageBitmap(), Color(color))
+    }
+
+    /**
+     * The tile-background color for a Metro tile: the icon designer's own background, so the tile reads
+     * like the app instead of an over-saturated accent. Prefers an adaptive icon's background layer
+     * (brand color for streaming apps; white for Play Store / YouTube-style icons), and otherwise the
+     * icon's dominant (most-common) color rather than its most vibrant one.
+     */
+    private fun metroTileColor(drawable: Drawable): Int {
+        (drawable as? AdaptiveIconDrawable)?.background?.let { bg ->
+            val bmp = bg.toBitmap(PALETTE_PX, PALETTE_PX)
+            Palette.from(bmp).generate().dominantSwatch?.rgb?.let { return it }
+        }
+        val bmp = drawable.toBitmap(PALETTE_PX, PALETTE_PX)
+        val palette = Palette.from(bmp).generate()
+        return (palette.dominantSwatch ?: palette.vibrantSwatch ?: palette.mutedSwatch)?.rgb ?: DEFAULT_TILE_ARGB
     }
 
     private fun persistMetro(pkg: String, bmp: Bitmap?, entry: DiskTile) {
@@ -230,7 +247,9 @@ class IconLoader(context: Context) {
         const val BANNER_H = 180 // 16:9 native banner; the UI crops it to the 5:3 tile
         const val ICON_PX = 144
         const val METRO_ICON_PX = 192 // crisp on a 1080p TV tile
-        const val METRO_PREFIX = "metro:" // disk-index key prefix; keeps Metro art off the tvOS tile
+        // Disk-index key prefix; keeps Metro art off the tvOS tile. Bump the suffix to invalidate old
+        // cached entries after changing how the tile color is derived (v2 = icon-background color).
+        const val METRO_PREFIX = "metro2:"
         const val PALETTE_PX = 64
         const val UNKNOWN_STAMP = -1L
         val DEFAULT_TILE_ARGB = 0xFF2A2A2C.toInt()

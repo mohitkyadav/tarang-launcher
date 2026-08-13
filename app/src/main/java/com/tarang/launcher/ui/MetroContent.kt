@@ -38,6 +38,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -213,6 +214,9 @@ fun MetroHome(
                 val wideWidth = tileHeight * 2 + MetroGap
                 val columnHeight = tileHeight * rows + MetroGap * (rows - 1)
                 val vMargin = (maxHeight - columnHeight).coerceAtLeast(0.dp)
+                // A shared slide reference (the wide-tile width, in px) so wide and square tiles slide the
+                // same distance during the launch/return wave.
+                val slideRefPx = with(density) { wideWidth.toPx() }
 
                 val favCols = remember(favorites, squareApps, rows) { packSlots(favorites, squareApps).chunked(rows) }
                 val restCols = remember(others, squareApps, rows) { packSlots(others, squareApps).chunked(rows) }
@@ -248,6 +252,7 @@ fun MetroHome(
                                 postersByApp = postersByApp,
                                 wideWidth = wideWidth,
                                 tileHeight = tileHeight,
+                                slideRefPx = slideRefPx,
                                 absoluteCol = ci,
                                 maxCol = maxCol,
                                 isFirstColumn = ci == 0,
@@ -270,6 +275,7 @@ fun MetroHome(
                                 postersByApp = postersByApp,
                                 wideWidth = wideWidth,
                                 tileHeight = tileHeight,
+                                slideRefPx = slideRefPx,
                                 absoluteCol = favCols.size + ci,
                                 maxCol = maxCol,
                                 isFirstColumn = favCols.isEmpty() && ci == 0,
@@ -322,6 +328,7 @@ private fun MetroColumn(
     postersByApp: Map<String, List<String>>,
     wideWidth: Dp,
     tileHeight: Dp,
+    slideRefPx: Float,
     absoluteCol: Int,
     maxCol: Int,
     isFirstColumn: Boolean,
@@ -339,7 +346,7 @@ private fun MetroColumn(
             metroGone(appearProgress(), absoluteCol, maxCol),
             metroGone(launchProgress(), absoluteCol, maxCol),
         )
-        applyMetroSlide(gone)
+        applyMetroSlide(gone, slideRefPx)
     }
 
     @Composable
@@ -439,12 +446,14 @@ private fun MetroCard(
         ),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Icon-on-color base (also the fallback if posters are still loading / fail).
+            // Icon-on-color base (also the fallback if posters are still loading / fail). Nudged up a
+            // touch so it reads centred in the space ABOVE the bottom-left label rather than the whole
+            // tile, and sized for a bit more presence.
             tile?.icon?.let {
                 Image(
                     bitmap = it,
                     contentDescription = app.label,
-                    modifier = Modifier.align(Alignment.Center).size(height * 0.42f),
+                    modifier = Modifier.align(BiasAlignment(0f, -0.18f)).size(height * 0.5f),
                 )
             }
             // Wide TV-content tiles rotate their posters full-bleed over the base.
@@ -474,7 +483,7 @@ private fun MetroCard(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
             )
         }
     }
