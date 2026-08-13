@@ -236,6 +236,10 @@ private val MetroEaseOut = CubicBezierEasing(0.1f, 0.9f, 0.2f, 1f)
  *  have left before the app window covers them. */
 const val METRO_LAUNCH_HOLD_MS = 500L
 
+/** How long the return wave holds the tiles off-screen after the launcher resumes, so the system's
+ *  close-app transition finishes and the slide-in is seen from the start (not already half-played). */
+const val METRO_RETURN_DELAY_MS = 180L
+
 /** The Metro launch (slide-out) / return (slide-in) spec — the same strong ease-out both ways. */
 fun metroLaunchSpec(entering: Boolean): AnimationSpec<Float> =
     tween(if (entering) 800 else 1100, easing = MetroEaseOut)

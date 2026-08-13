@@ -398,6 +398,9 @@ fun LauncherScreen(
             if (settings.launcherStyle == LauncherStyle.WINDOWS_METRO) {
                 metroLaunch.snapTo(1f)
                 topBarLaunch.snapTo(1f)
+                // Hold the board off-screen until the launcher is actually visible (the system's
+                // close-app transition is still running right after resume), so the wave plays in full.
+                delay(METRO_RETURN_DELAY_MS)
                 launch { metroLaunch.animateTo(0f, metroLaunchSpec(entering = false)) }
                 launch {
                     topBarLaunch.animateTo(0f, metroLaunchSpec(entering = false))
