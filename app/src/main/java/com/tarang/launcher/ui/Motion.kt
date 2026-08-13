@@ -256,16 +256,27 @@ private const val METRO_APPEAR_RISE = 0.22f // how far a tile rises into place, 
 
 /**
  * Maps the master Metro launch progress ([progress], sampled per frame in a graphicsLayer) onto a
- * per-tile scatter about the tapped tile. [origin] is the hero's index in a [columns]-wide grid.
- * Progress: 0f = home (tiles at rest), 1f = launched (hero zoomed away, neighbours off-screen).
+ * per-tile scatter about the tapped tile. The board is a column-major grid of [rows] rows: the first
+ * [favCount] tiles fill the favorites columns (top-to-bottom), then the rest continue after them —
+ * matching MetroHome's layout, so the scatter flies each tile away from the hero in board coordinates.
+ * [origin] is the hero's flat index. Progress: 0f = home (tiles at rest), 1f = launched (gone).
  */
 class MetroLaunch(
     val origin: Int,
-    private val columns: Int,
+    private val rows: Int,
+    private val favCount: Int,
     private val progress: () -> Float,
 ) {
-    private val originRow = origin / columns
-    private val originCol = origin % columns
+    /** Board cell (column, rowInColumn) for a flat index. */
+    private fun cell(index: Int): Pair<Int, Int> {
+        val favCols = (favCount + rows - 1) / rows
+        return if (index < favCount) {
+            index / rows to index % rows
+        } else {
+            val j = index - favCount
+            (favCols + j / rows) to (j % rows)
+        }
+    }
 
     /** The per-tile transform for grid [index], read lazily each frame in the tile's own layer. */
     fun tileLayer(index: Int): GraphicsLayerScope.() -> Unit = {
@@ -273,7 +284,9 @@ class MetroLaunch(
         if (index == origin) {
             applyMetroHero(p)
         } else {
-            applyMetroScatter(p, index % columns - originCol, index / columns - originRow)
+            val (originCol, originRow) = cell(origin)
+            val (col, row) = cell(index)
+            applyMetroScatter(p, col - originCol, row - originRow)
         }
     }
 }

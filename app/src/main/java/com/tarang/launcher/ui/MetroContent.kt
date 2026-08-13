@@ -13,12 +13,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
@@ -54,102 +55,167 @@ import com.tarang.launcher.data.AppInfo
 import com.tarang.launcher.data.IconLoader
 import com.tarang.launcher.data.MetroTile
 
-private val MetroSidePad = 48.dp // horizontal screen margin for the Start screen
+private val MetroSidePad = 48.dp // horizontal screen margin
 private val MetroGap = 12.dp // tight gap between tiles (the dense Metro look)
-private val MetroTopPad = 20.dp // gap under the top bar
+private val MetroGutter = 44.dp // the vertical channel between the favorites group and the rest
+private val MetroTopPad = 16.dp // gap under the top bar
+private val MetroTargetTile = 168.dp // preferred tile side; the row count is derived from it
+private const val MetroMinRows = 3
+private const val MetroMaxRows = 5
 
 /**
- * The Windows Metro home surface: a scrolling grid of flat, sharp-cornered live tiles, each in the
- * app's own accent color with the icon centered and the name in the bottom-left. It reuses the shared
- * launcher machinery through its inputs — [topBar] is the shared top bar (clock / Frame Art /
- * settings), and [scatter] carries the launch/return animation driven by [LauncherScreen].
+ * The Windows Metro home surface: a horizontally-scrolling board of flat, sharp-cornered live tiles.
+ * Tiles fill each column top-to-bottom, then the next column (column-major), the way the Windows 8
+ * Start screen packs them. The favorites form the first group; a wide gutter separates them from the
+ * rest. With no favorites there is a single group and no gutter.
  *
- * A LazyColumn of rows (not a LazyVerticalGrid) keeps D-pad focus reliable on TV — the same choice
- * the tvOS layout makes.
+ * D-pad Up/Down moves within a column; Left/Right crosses columns (and the gutter) and scrolls the
+ * board. The shared top bar (clock / Frame Art / settings) rides in through [topBar]; [launchOrigin]
+ * and [launchProgress] carry the launch/return scatter driven by [LauncherScreen].
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MetroHome(
-    apps: List<AppInfo>,
-    columns: Int,
+    favorites: List<AppInfo>,
+    others: List<AppInfo>,
     iconLoader: IconLoader,
+    launchOrigin: Int,
+    launchProgress: () -> Float,
     onAppFocused: (String) -> Unit,
     onAppClicked: (String) -> Unit,
     topFocusRequester: FocusRequester?,
     topBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
-    scatter: MetroLaunch? = null,
 ) {
-    val rows = remember(apps, columns) { apps.chunked(columns) }
+    val flatSize = favorites.size + others.size
     val firstCard = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val density = LocalDensity.current
 
-    // Entrance cascade: runs once when the Start screen appears (and again if the user switches into
-    // Metro from another style). Read lazily at draw time so it never triggers a recomposition.
+    // Entrance cascade: runs once when the Start screen appears (and again on a switch into Metro).
+    // Read lazily at draw time so it never triggers a recomposition.
     val appear = remember { Animatable(0f) }
     LaunchedEffect(Unit) { appear.animateTo(1f, metroAppearSpec()) }
     val appearProgress = remember { { appear.value } }
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val availWidth = maxWidth - MetroSidePad * 2
-        val tileSize = (availWidth - MetroGap * (columns - 1)) / columns
+    Column(modifier = modifier.fillMaxSize()) {
+        topBar()
+        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            // Derive the row count (and therefore the tile size) from the board height.
+            val rows = ((maxHeight.value + MetroGap.value) / (MetroTargetTile.value + MetroGap.value))
+                .toInt().coerceIn(MetroMinRows, MetroMaxRows)
+            val tileSize = (maxHeight - MetroGap * (rows - 1)) / rows
 
-        // Same scale-halo slop as the tvOS grid, so the first Left/Right move into a row never nudges.
-        val bringIntoView = remember(tileSize, density) {
-            minimalBringIntoView(with(density) { tileSize.toPx() } * 0.08f + 3f)
-        }
+            val favCols = remember(favorites, rows) { favorites.chunked(rows) }
+            val restCols = remember(others, rows) { others.chunked(rows) }
+            val favCount = favorites.size
 
-        Column(modifier = Modifier.fillMaxSize()) {
-            topBar()
+            val scatter = remember(launchOrigin, rows, favCount, flatSize) {
+                if (launchOrigin in 0 until flatSize) {
+                    MetroLaunch(launchOrigin, rows, favCount, launchProgress)
+                } else {
+                    null
+                }
+            }
+
+            // Same scale-halo slop as the tvOS grid, so the first Left/Right move never nudges.
+            val bringIntoView = remember(tileSize, density) {
+                minimalBringIntoView(with(density) { tileSize.toPx() } * 0.08f + 3f)
+            }
+
             CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoView) {
-                LazyColumn(
+                LazyRow(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
                         start = MetroSidePad,
                         end = MetroSidePad,
                         top = MetroTopPad,
-                        bottom = 56.dp,
+                        bottom = 8.dp,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(MetroGap),
+                    horizontalArrangement = Arrangement.spacedBy(MetroGap),
+                    verticalAlignment = Alignment.Top,
                 ) {
-                    itemsIndexed(rows, key = { _, row -> row.first().packageName }) { rowIndex, row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(MetroGap)) {
-                            row.forEachIndexed { colIndex, app ->
-                                val index = rowIndex * columns + colIndex
-                                MetroCard(
-                                    app = app,
-                                    iconLoader = iconLoader,
-                                    size = tileSize,
-                                    onFocused = { onAppFocused(app.packageName) },
-                                    onClick = { onAppClicked(app.packageName) },
-                                    // Only the top row sends D-pad UP to the top bar (settings button).
-                                    upFocusRequester = if (rowIndex == 0) topFocusRequester else null,
-                                    layer = {
-                                        applyMetroAppear(appearProgress(), rowIndex, colIndex)
-                                        scatter?.tileLayer(index)?.invoke(this)
-                                    },
-                                    modifier = Modifier
-                                        .then(if (index == 0) Modifier.focusRequester(firstCard) else Modifier)
-                                        // The hero tile draws over its neighbours as it zooms out.
-                                        .then(
-                                            if (scatter != null && index == scatter.origin) {
-                                                Modifier.zIndex(10f)
-                                            } else {
-                                                Modifier
-                                            },
-                                        ),
-                                )
-                            }
-                        }
+                    itemsIndexed(favCols, key = { _, col -> "fav-" + col.first().packageName }) { ci, col ->
+                        MetroColumn(
+                            apps = col,
+                            iconLoader = iconLoader,
+                            tileSize = tileSize,
+                            absoluteCol = ci,
+                            flatStart = ci * rows,
+                            scatter = scatter,
+                            appearProgress = appearProgress,
+                            firstCard = firstCard,
+                            topFocusRequester = topFocusRequester,
+                            onAppFocused = onAppFocused,
+                            onAppClicked = onAppClicked,
+                        )
+                    }
+                    if (favCols.isNotEmpty() && restCols.isNotEmpty()) {
+                        item(key = "gutter") { Spacer(Modifier.width(MetroGutter)) }
+                    }
+                    itemsIndexed(restCols, key = { _, col -> "rest-" + col.first().packageName }) { ci, col ->
+                        MetroColumn(
+                            apps = col,
+                            iconLoader = iconLoader,
+                            tileSize = tileSize,
+                            absoluteCol = favCols.size + ci,
+                            flatStart = favCount + ci * rows,
+                            scatter = scatter,
+                            appearProgress = appearProgress,
+                            firstCard = firstCard,
+                            topFocusRequester = topFocusRequester,
+                            onAppFocused = onAppFocused,
+                            onAppClicked = onAppClicked,
+                        )
                     }
                 }
             }
         }
+    }
 
-        LaunchedEffect(apps.firstOrNull()?.packageName) {
-            if (apps.isNotEmpty()) runCatching { firstCard.requestFocus() }
+    LaunchedEffect(favorites.firstOrNull()?.packageName, others.firstOrNull()?.packageName) {
+        if (flatSize > 0) runCatching { firstCard.requestFocus() }
+    }
+}
+
+/** One board column: a top-to-bottom stack of up to `rows` tiles. */
+@Composable
+private fun MetroColumn(
+    apps: List<AppInfo>,
+    iconLoader: IconLoader,
+    tileSize: Dp,
+    absoluteCol: Int,
+    flatStart: Int,
+    scatter: MetroLaunch?,
+    appearProgress: () -> Float,
+    firstCard: FocusRequester,
+    topFocusRequester: FocusRequester?,
+    onAppFocused: (String) -> Unit,
+    onAppClicked: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(MetroGap)) {
+        apps.forEachIndexed { positionInColumn, app ->
+            val flatIndex = flatStart + positionInColumn
+            MetroCard(
+                app = app,
+                iconLoader = iconLoader,
+                size = tileSize,
+                onFocused = { onAppFocused(app.packageName) },
+                onClick = { onAppClicked(app.packageName) },
+                // Only the top tile of each column sends D-pad UP to the top bar (settings button).
+                upFocusRequester = if (positionInColumn == 0) topFocusRequester else null,
+                layer = {
+                    applyMetroAppear(appearProgress(), positionInColumn, absoluteCol)
+                    scatter?.tileLayer(flatIndex)?.invoke(this)
+                },
+                modifier = Modifier
+                    .then(if (flatIndex == 0) Modifier.focusRequester(firstCard) else Modifier)
+                    // The hero tile draws over its neighbours as it zooms out.
+                    .then(
+                        if (scatter != null && flatIndex == scatter.origin) Modifier.zIndex(10f) else Modifier,
+                    ),
+            )
         }
     }
 }

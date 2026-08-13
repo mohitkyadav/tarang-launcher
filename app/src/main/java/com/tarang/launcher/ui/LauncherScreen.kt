@@ -325,16 +325,10 @@ fun LauncherScreen(
 
     // Metro launch: its own progress (0 = home, 1 = launched) driving the tile scatter/zoom, plus the
     // launched tile's index in [metroApps] (the scatter origin). Separate from the tvOS dock ripple so
-    // each style keeps its own timing; only the active style's Animatable is ever animated.
+    // each style keeps its own timing; only the active style's Animatable is ever animated. MetroHome
+    // owns the scatter geometry (it knows the board's row count), so it just reads these two.
     val metroLaunch = remember { Animatable(0f) }
     var launchMetroIndex by remember { mutableIntStateOf(-1) }
-    val metroScatter = remember(launchMetroIndex, settings.columns, metroApps.size) {
-        if (launchMetroIndex in metroApps.indices) {
-            MetroLaunch(launchMetroIndex, settings.columns) { metroLaunch.value }
-        } else {
-            null
-        }
-    }
 
     fun launchApp(packageName: String) {
         // No window scale-up — the app opens with the system default while the launcher chrome does the
@@ -648,10 +642,11 @@ fun LauncherScreen(
                         uiState.isLoading -> Centered { Text("Loading apps…", color = colors.text, fontSize = 20.sp) }
                         uiState.allApps.isEmpty() -> Centered { Text("No apps found", color = colors.text, fontSize = 20.sp) }
                         else -> MetroHome(
-                            apps = metroApps,
-                            columns = settings.columns,
+                            favorites = uiState.dockApps,
+                            others = visibleGrid,
                             iconLoader = container.iconLoader,
-                            scatter = metroScatter,
+                            launchOrigin = launchMetroIndex,
+                            launchProgress = { metroLaunch.value },
                             onAppFocused = viewModel::onAppFocused,
                             onAppClicked = { pkg -> launchApp(pkg) },
                             topFocusRequester = tuneFocus,
