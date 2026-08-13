@@ -68,7 +68,7 @@ private val MinTopGap = 84.dp // floor for the computed top gap on very short vi
 // re-fit the scaled tile against the edge — a visible one-time nudge. [slop] is sized to that halo
 // (see the call site) so an already-visible row is left alone and never re-fits.
 @OptIn(ExperimentalFoundationApi::class)
-private fun minimalBringIntoView(slop: Float): BringIntoViewSpec = object : BringIntoViewSpec {
+internal fun minimalBringIntoView(slop: Float): BringIntoViewSpec = object : BringIntoViewSpec {
     private val inset = 24f // keep a focused row a hair off the screen edges (covers the focus scale)
 
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {

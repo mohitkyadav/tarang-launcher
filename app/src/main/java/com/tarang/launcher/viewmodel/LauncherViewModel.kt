@@ -105,16 +105,28 @@ class LauncherViewModel(
             favoritesStore.setFavorites(loaded.take(DEFAULT_DOCK_COUNT).map { it.packageName })
             favoritesStore.markSeeded()
         }
-        prefetchTiles(loaded)
+        // Warm the art the active home style shows (the two styles resolve different bitmaps), so the
+        // prefetch cost stays the same as before rather than doubling.
+        val style = runCatching { settingsStore.settings.first().launcherStyle }
+            .getOrDefault(com.tarang.launcher.data.LauncherStyle.TVOS)
+        prefetchTiles(loaded, style)
     }
 
-    /** Warms the tile-art disk cache for every app (sequentially, after a beat) so off-screen grid
-     *  tiles — and the whole next cold start — load from disk instead of the slow PM resolve. */
-    private fun prefetchTiles(apps: List<AppInfo>) {
+    /** Warms the tile-art disk cache for every app (sequentially, after a beat) so off-screen tiles —
+     *  and the whole next cold start — load from disk instead of the slow PM resolve. */
+    private fun prefetchTiles(apps: List<AppInfo>, style: com.tarang.launcher.data.LauncherStyle) {
         prefetchJob?.cancel()
         prefetchJob = viewModelScope.launch(Dispatchers.IO) {
             delay(PREFETCH_DELAY_MS)
-            for (app in apps) runCatching { iconLoader.loadTile(app) }
+            for (app in apps) {
+                runCatching {
+                    if (style == com.tarang.launcher.data.LauncherStyle.WINDOWS_METRO) {
+                        iconLoader.loadMetroTile(app)
+                    } else {
+                        iconLoader.loadTile(app)
+                    }
+                }
+            }
         }
     }
 
@@ -141,6 +153,8 @@ class LauncherViewModel(
     fun setWallpaper(id: Int) = viewModelScope.launch { settingsStore.setWallpaper(id) }.let {}
     fun setGlassBlur(value: Boolean) = viewModelScope.launch { settingsStore.setGlassBlur(value) }.let {}
     fun setColumns(n: Int) = viewModelScope.launch { settingsStore.setColumns(n) }.let {}
+    fun setLauncherStyle(style: com.tarang.launcher.data.LauncherStyle) =
+        viewModelScope.launch { settingsStore.setLauncherStyle(style) }.let {}
     fun setImageWallpaper(path: String) = viewModelScope.launch { settingsStore.setImageWallpaper(path) }.let {}
     fun setUseImageWallpaper(value: Boolean) = viewModelScope.launch { settingsStore.setUseImageWallpaper(value) }.let {}
     fun setUseAppArtwork(value: Boolean) = viewModelScope.launch { settingsStore.setUseAppArtwork(value) }.let {}

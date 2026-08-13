@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.TransformOrigin
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.pow
 
 /**
@@ -217,4 +218,101 @@ fun GraphicsLayerScope.applyDisperseTile(p: Float, spread: Float, growth: Float)
     val arc = DISPERSE_ARC * size.height * (vp * (1f - vp) * 4f)
     translationY += -0.33f * size.height * (p * abs(p)) - arc
     translationX += spread * size.width
+}
+
+// ===================================================================================================
+// Windows Metro motion — a separate motion language for the Metro home style. Its launch is the
+// signature: the tapped tile zooms toward the viewer and dissolves (the app grows out of it) while
+// every other tile flies radially off the screen; the return runs the mapping backwards so the tiles
+// cascade back in. The Start screen also has an entrance cascade (tiles rise + fade in on a diagonal).
+// ===================================================================================================
+
+// A fast ease-out for the scatter (quick start, gentle settle). Its Y control points stay ≤ 1, so —
+// unlike an overshoot bezier — it can never make Compose's solver throw. The return uses a plain
+// ease-in-out. Neither overshoots.
+private val MetroOutEase = CubicBezierEasing(0.12f, 0.85f, 0.25f, 1f)
+private val MetroInEase = CubicBezierEasing(0.35f, 0.0f, 0.25f, 1f)
+
+/** How long [LauncherScreen] waits after starting the Metro launch scatter before it starts the app,
+ *  so the tiles are mostly gone before the app window covers them. */
+const val METRO_LAUNCH_HOLD_MS = 320L
+
+/** The Metro launch/return spec. Entering: a fast scatter out. Returning: a calmer cascade in. */
+fun metroLaunchSpec(entering: Boolean): AnimationSpec<Float> =
+    tween(if (entering) 420 else 560, easing = if (entering) MetroOutEase else MetroInEase)
+
+/** The Metro Start-screen entrance-cascade spec. */
+fun metroAppearSpec(): AnimationSpec<Float> = tween(720, easing = StandardEase)
+
+// Launch geometry.
+private const val METRO_HERO_ZOOM = 1.5f // how much the tapped tile grows on its way out
+private const val METRO_FLY_BASE = 1.4f // base fly-out distance for a neighbour, in tile widths
+private const val METRO_FLY_PER_RING = 0.35f // extra fly-out per unit of distance from the hero
+private const val METRO_SCATTER_STAGGER = 0.05f // start-time offset per unit distance (the parting ripples out)
+
+// Entrance-cascade geometry.
+private const val METRO_APPEAR_STAGGER = 0.045f // start-time offset per (row + col) diagonal step
+private const val METRO_APPEAR_RISE = 0.22f // how far a tile rises into place, in tile heights
+
+/**
+ * Maps the master Metro launch progress ([progress], sampled per frame in a graphicsLayer) onto a
+ * per-tile scatter about the tapped tile. [origin] is the hero's index in a [columns]-wide grid.
+ * Progress: 0f = home (tiles at rest), 1f = launched (hero zoomed away, neighbours off-screen).
+ */
+class MetroLaunch(
+    val origin: Int,
+    private val columns: Int,
+    private val progress: () -> Float,
+) {
+    private val originRow = origin / columns
+    private val originCol = origin % columns
+
+    /** The per-tile transform for grid [index], read lazily each frame in the tile's own layer. */
+    fun tileLayer(index: Int): GraphicsLayerScope.() -> Unit = {
+        val p = progress().coerceIn(0f, 1f)
+        if (index == origin) {
+            applyMetroHero(p)
+        } else {
+            applyMetroScatter(p, index % columns - originCol, index / columns - originRow)
+        }
+    }
+}
+
+/** The hero tile: it zooms toward the viewer and dissolves — the app appears to grow out of it. */
+private fun GraphicsLayerScope.applyMetroHero(p: Float) {
+    val s = 1f + METRO_HERO_ZOOM * p
+    scaleX *= s
+    scaleY *= s
+    alpha *= 1f - smoothstep((p - 0.15f) / 0.55f)
+}
+
+/** A neighbour tile: it flies radially outward from the hero (along its grid offset) and fades. */
+private fun GraphicsLayerScope.applyMetroScatter(p: Float, dx: Int, dy: Int) {
+    val dist = hypot(dx.toFloat(), dy.toFloat()).coerceAtLeast(1f)
+    val start = (METRO_SCATTER_STAGGER * (dist - 1f)).coerceIn(0f, 0.35f)
+    val local = ((p - start) / (1f - start)).coerceIn(0f, 1f)
+    val fly = (METRO_FLY_BASE + METRO_FLY_PER_RING * dist) * local
+    translationX += dx / dist * fly * size.width
+    translationY += dy / dist * fly * size.height
+    val shrink = 1f - 0.12f * local
+    scaleX *= shrink
+    scaleY *= shrink
+    alpha *= 1f - smoothstep((local - 0.05f) / 0.5f)
+}
+
+/**
+ * The Metro Start-screen entrance: tile at [row]/[col] rises into place and fades in, staggered on a
+ * diagonal from the top-left. [p] is the appear progress (0 → nothing shown, 1 → all settled).
+ * MULTIPLIES into the tile's own graphicsLayer, so it composes with the launch scatter and focus scale.
+ */
+fun GraphicsLayerScope.applyMetroAppear(p: Float, row: Int, col: Int) {
+    if (p >= 1f) return
+    val delay = (METRO_APPEAR_STAGGER * (row + col)).coerceAtMost(0.6f)
+    val local = ((p - delay) / 0.4f).coerceIn(0f, 1f)
+    val e = 1f - (1f - local) * (1f - local) // ease-out quad
+    translationY += (1f - e) * METRO_APPEAR_RISE * size.height
+    alpha *= e
+    val s = 0.92f + 0.08f * e
+    scaleX *= s
+    scaleY *= s
 }

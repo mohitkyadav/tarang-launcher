@@ -27,6 +27,13 @@ sealed interface TileArt {
 }
 
 /**
+ * Artwork for one Windows Metro tile: the app's square icon and a flat accent color drawn from it. The
+ * Metro grid always uses icon-on-color (never the banner), so this is resolved and cached separately
+ * from [TileArt].
+ */
+data class MetroTile(val icon: androidx.compose.ui.graphics.ImageBitmap?, val color: Color)
+
+/**
  * Resolves per-app tile artwork (plan §2.3 / §5.3) and a brand accent color. Prefers the app's
  * banner so tiles look like tvOS/Google TV; falls back to icon-on-color when no banner is provided.
  *
@@ -40,6 +47,7 @@ class IconLoader(context: Context) {
 
     private val pm: PackageManager = context.applicationContext.packageManager
     private val tileCache = LruCache<String, TileArt>(CACHE_ENTRIES)
+    private val metroCache = LruCache<String, MetroTile>(CACHE_ENTRIES)
     private val colorCache = LruCache<String, Int>(CACHE_ENTRIES)
 
     private val diskDir = File(context.applicationContext.filesDir, "tiles")
@@ -59,6 +67,57 @@ class IconLoader(context: Context) {
             tile
         }
     }
+
+    /**
+     * Resolves the Metro tile art (icon + accent color) for [app]. Cached at the same three levels as
+     * [loadTile] — an in-memory LRU, a disk bitmap + index entry (keyed under [METRO_PREFIX] so it
+     * never collides with the tvOS tile), then the full PackageManager resolve. The disk layer keeps a
+     * cold start into Metro cheap.
+     */
+    suspend fun loadMetroTile(app: AppInfo): MetroTile {
+        metroCache.get(app.packageName)?.let { return it }
+        return withContext(Dispatchers.IO) {
+            metroCache.get(app.packageName)?.let { return@withContext it }
+            val tile = loadMetroFromDisk(app) ?: resolveMetro(app)
+            metroCache.put(app.packageName, tile)
+            tile
+        }
+    }
+
+    private fun loadMetroFromDisk(app: AppInfo): MetroTile? {
+        val entry = index()[METRO_PREFIX + app.packageName] ?: return null
+        val current = packageStamp(app.packageName)
+        if (current != UNKNOWN_STAMP && current != entry.stamp) return null
+        val bitmap = runCatching { BitmapFactory.decodeFile(metroFile(app.packageName).path) }.getOrNull()
+        return MetroTile(bitmap?.asImageBitmap(), Color(entry.color))
+    }
+
+    private fun resolveMetro(app: AppInfo): MetroTile {
+        val stamp = packageStamp(app.packageName)
+        val icon = resolveIcon(app)
+        val bmp = icon?.toBitmap(METRO_ICON_PX, METRO_ICON_PX)
+        val color = icon?.let { colorFromDrawable(it) } ?: DEFAULT_TILE_ARGB
+        persistMetro(app.packageName, bmp, DiskTile(banner = false, color = color, stamp = stamp))
+        return MetroTile(bmp?.asImageBitmap(), Color(color))
+    }
+
+    private fun persistMetro(pkg: String, bmp: Bitmap?, entry: DiskTile) {
+        runCatching {
+            diskDir.mkdirs()
+            val file = metroFile(pkg)
+            if (bmp != null) {
+                file.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
+            } else {
+                file.delete()
+            }
+            synchronized(diskLock) {
+                index()[METRO_PREFIX + pkg] = entry
+                writeIndex()
+            }
+        }
+    }
+
+    private fun metroFile(pkg: String): File = File(diskDir, "$pkg.metro.img")
 
     /** Brand color drawn from the app's icon, used for the ambient wallpaper tint. */
     suspend fun accentColor(app: AppInfo): Color {
@@ -170,6 +229,8 @@ class IconLoader(context: Context) {
         const val BANNER_W = 320
         const val BANNER_H = 180 // 16:9 native banner; the UI crops it to the 5:3 tile
         const val ICON_PX = 144
+        const val METRO_ICON_PX = 192 // crisp on a 1080p TV tile
+        const val METRO_PREFIX = "metro:" // disk-index key prefix; keeps Metro art off the tvOS tile
         const val PALETTE_PX = 64
         const val UNKNOWN_STAMP = -1L
         val DEFAULT_TILE_ARGB = 0xFF2A2A2C.toInt()

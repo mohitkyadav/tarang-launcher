@@ -79,6 +79,7 @@ import androidx.tv.material3.Text
 import com.tarang.launcher.R
 import com.tarang.launcher.data.FrameSource
 import com.tarang.launcher.data.LauncherSettings
+import com.tarang.launcher.data.LauncherStyle
 import com.tarang.launcher.data.WeatherUnit
 import com.tarang.launcher.di.AppContainer
 import com.tarang.launcher.home.HomeSetup
@@ -166,6 +167,9 @@ fun LauncherScreen(
     val visibleGrid = remember(uiState.gridApps, settings.hiddenApps) {
         uiState.gridApps.filterNot { it.packageName in settings.hiddenApps }
     }
+    // The Metro Start screen is one flat tile grid: favorites first, then the rest. This ordering is
+    // shared with launchApp so the launched tile's index (the scatter origin) lines up with the grid.
+    val metroApps = remember(uiState.dockApps, visibleGrid) { uiState.dockApps + visibleGrid }
     val preset = WallpaperPresets.getOrElse(settings.wallpaperId) { WallpaperPresets.first() }
     val imagePath = settings.wallpaperImagePath
     val showImage = settings.useImageWallpaper && imagePath != null && remember(imagePath) { File(imagePath).exists() }
@@ -319,22 +323,42 @@ fun LauncherScreen(
         }
     }
 
+    // Metro launch: its own progress (0 = home, 1 = launched) driving the tile scatter/zoom, plus the
+    // launched tile's index in [metroApps] (the scatter origin). Separate from the tvOS dock ripple so
+    // each style keeps its own timing; only the active style's Animatable is ever animated.
+    val metroLaunch = remember { Animatable(0f) }
+    var launchMetroIndex by remember { mutableIntStateOf(-1) }
+    val metroScatter = remember(launchMetroIndex, settings.columns, metroApps.size) {
+        if (launchMetroIndex in metroApps.indices) {
+            MetroLaunch(launchMetroIndex, settings.columns) { metroLaunch.value }
+        } else {
+            null
+        }
+    }
+
     fun launchApp(packageName: String) {
         // No window scale-up — the app opens with the system default while the launcher chrome does the
         // dock-drop / bar-rise dissolve (the same motion as entering Frame Art).
         if (launchInFlight || awaitingReturn) return // ignore taps during the hold or while in an app
         sounds.click()
-        launchDockIndex = uiState.dockApps.indexOfFirst { it.packageName == packageName }
+        val metro = settings.launcherStyle == LauncherStyle.WINDOWS_METRO
+        if (metro) {
+            launchMetroIndex = metroApps.indexOfFirst { it.packageName == packageName }
+            launchDockIndex = -1
+        } else {
+            launchDockIndex = uiState.dockApps.indexOfFirst { it.packageName == packageName }
+        }
         launchInFlight = true
         scope.launch {
             // First, when the frosted glass is on, clear it (blur -> 0 over 300ms) before the move — a
             // two-stage open. With blur off there is nothing to clear, so fly immediately.
             if (settings.glassBlur) blurFade.animateTo(0f, tween(300))
             launchTick++ // start the launch animation
-            // Hold the actual app start until the dock ripple has played (see Motion.kt), so a
+            // Hold the actual app start until the launch animation has played (see Motion.kt), so a
             // fast-starting app can't cover the move halfway through. awaitingReturn stays false through
             // the hold, so a stray resume here can't fire a return.
-            if (DEPTH_LAUNCH_HOLD_MS > 0) delay(DEPTH_LAUNCH_HOLD_MS)
+            val hold = if (metro) METRO_LAUNCH_HOLD_MS else DEPTH_LAUNCH_HOLD_MS
+            if (hold > 0) delay(hold)
             val launched = viewModel.launchApp(packageName, null)
             launchInFlight = false
             if (!launched) {
@@ -367,27 +391,47 @@ fun LauncherScreen(
     }
     LaunchedEffect(launchTick) {
         if (launchTick > 0) {
-            // Leaving for the app. The dock leads, the top bar trails; per-style timing (Motion.kt). Run
-            // them in parallel so each keeps its own duration.
-            launch { dockLaunch.animateTo(1f, launchDockSpec(entering = true)) }
-            launch { topBarLaunch.animateTo(1f, launchTopBarSpec(entering = true)) }
+            // Leaving for the app. Metro scatters its tiles on its own fast spec; tvOS drops the dock
+            // and trails the top bar. Either way topBarLaunch drives `transitioning` (which freezes the
+            // glass) and fades the top bar. Run in parallel so each layer keeps its own duration.
+            if (settings.launcherStyle == LauncherStyle.WINDOWS_METRO) {
+                launch { metroLaunch.animateTo(1f, metroLaunchSpec(entering = true)) }
+                launch { topBarLaunch.animateTo(1f, metroLaunchSpec(entering = true)) }
+            } else {
+                launch { dockLaunch.animateTo(1f, launchDockSpec(entering = true)) }
+                launch { topBarLaunch.animateTo(1f, launchTopBarSpec(entering = true)) }
+            }
         }
     }
     LaunchedEffect(returnTick) {
         if (returnTick > 0) {
-            // Returning from the app: start from the launched state and reverse home. Once the dock
-            // has settled, forget the ripple origin so the tiles shed their extra draw layers.
-            dockLaunch.snapTo(1f)
-            topBarLaunch.snapTo(1f)
-            // blurFade stays 0 (cleared) through the return — the glass is off while the chrome moves.
-            launch {
-                dockLaunch.animateTo(0f, launchDockSpec(entering = false))
-                launchDockIndex = -1
-            }
-            launch {
-                topBarLaunch.animateTo(0f, launchTopBarSpec(entering = false))
-                // Chrome is back at rest — re-focus the glass gradually (over 650ms) at the end.
-                blurFade.animateTo(1f, tween(650))
+            // Returning from the app: start from the launched state and reverse home. Once settled,
+            // forget the launch origin so the tiles shed their extra draw layers.
+            if (settings.launcherStyle == LauncherStyle.WINDOWS_METRO) {
+                metroLaunch.snapTo(1f)
+                topBarLaunch.snapTo(1f)
+                launch {
+                    metroLaunch.animateTo(0f, metroLaunchSpec(entering = false))
+                    launchMetroIndex = -1
+                }
+                launch {
+                    topBarLaunch.animateTo(0f, metroLaunchSpec(entering = false))
+                    // Chrome is back at rest — re-focus the glass gradually (over 650ms) at the end.
+                    blurFade.animateTo(1f, tween(650))
+                }
+            } else {
+                dockLaunch.snapTo(1f)
+                topBarLaunch.snapTo(1f)
+                // blurFade stays 0 (cleared) through the return — the glass is off while the chrome moves.
+                launch {
+                    dockLaunch.animateTo(0f, launchDockSpec(entering = false))
+                    launchDockIndex = -1
+                }
+                launch {
+                    topBarLaunch.animateTo(0f, launchTopBarSpec(entering = false))
+                    // Chrome is back at rest — re-focus the glass gradually (over 650ms) at the end.
+                    blurFade.animateTo(1f, tween(650))
+                }
             }
         }
     }
@@ -554,6 +598,7 @@ fun LauncherScreen(
                     onWallpaper = viewModel::setWallpaper,
                     onGlassBlur = viewModel::setGlassBlur,
                     onColumns = viewModel::setColumns,
+                    onLauncherStyle = viewModel::setLauncherStyle,
                     onPickImage = pickImage,
                     onUseImage = { viewModel.setUseImageWallpaper(true) },
                     onScanTvContent = { showTvProbe = true },
@@ -590,6 +635,50 @@ fun LauncherScreen(
                     onChooseHomeApp = chooseHomeApp,
                     onClose = { sounds.back(); showSettings = false },
                 )
+            } else if (settings.launcherStyle == LauncherStyle.WINDOWS_METRO) {
+                // Windows Metro home. The whole surface fades out as Frame Art takes over (frameProgress);
+                // per-tile scatter (metroScatter) carries app launches. The shared top bar rides in
+                // through MetroHome's slot and fades on launch via topBarLaunch.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = (1f - frameProgress.value * 1.5f).coerceIn(0f, 1f) },
+                ) {
+                    when {
+                        uiState.isLoading -> Centered { Text("Loading apps…", color = colors.text, fontSize = 20.sp) }
+                        uiState.allApps.isEmpty() -> Centered { Text("No apps found", color = colors.text, fontSize = 20.sp) }
+                        else -> MetroHome(
+                            apps = metroApps,
+                            columns = settings.columns,
+                            iconLoader = container.iconLoader,
+                            scatter = metroScatter,
+                            onAppFocused = viewModel::onAppFocused,
+                            onAppClicked = { pkg -> launchApp(pkg) },
+                            topFocusRequester = tuneFocus,
+                            topBar = {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .graphicsLayer { alpha = (1f - topBarLaunch.value).coerceIn(0f, 1f) },
+                                ) {
+                                    TopBar(
+                                        onOpenSettings = { sounds.click(); showSettings = true },
+                                        onEnterFrame = { sounds.click(); frameOn = true },
+                                        nowPlaying = nowPlaying,
+                                        onOpenNowPlaying = { pkg -> launchApp(pkg) },
+                                        homeWeather = if (settings.weatherOnHome) weather else null,
+                                        tuneFocus = tuneFocus,
+                                        backdrop = backdrop,
+                                        glassLive = !transitioning && !frameMoving,
+                                        glassRefract = !transitioning && !frameMoving,
+                                        glassBlur = settings.glassBlur,
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
                     // Top bar rises up and off the top — driven by BOTH the frame transition and an app

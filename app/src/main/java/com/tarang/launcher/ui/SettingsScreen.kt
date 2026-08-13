@@ -86,6 +86,7 @@ import com.tarang.launcher.data.FrameClockPosition
 import com.tarang.launcher.data.FrameClockSize
 import com.tarang.launcher.data.FrameSource
 import com.tarang.launcher.data.LauncherSettings
+import com.tarang.launcher.data.LauncherStyle
 import com.tarang.launcher.data.MAX_COLUMNS
 import com.tarang.launcher.data.MIN_COLUMNS
 import com.tarang.launcher.data.TV_LISTINGS_PERMISSION
@@ -117,6 +118,7 @@ fun SettingsScreen(
     onWallpaper: (Int) -> Unit,
     onGlassBlur: (Boolean) -> Unit,
     onColumns: (Int) -> Unit,
+    onLauncherStyle: (LauncherStyle) -> Unit,
     onPickImage: () -> Unit,
     onUseImage: () -> Unit,
     onScanTvContent: () -> Unit,
@@ -210,6 +212,7 @@ fun SettingsScreen(
                         onWallpaper = onWallpaper,
                         onGlassBlur = onGlassBlur,
                         onColumns = onColumns,
+                        onLauncherStyle = onLauncherStyle,
                         onPickImage = onPickImage,
                         onUseImage = onUseImage,
                         favoriteApps = favoriteApps,
@@ -330,6 +333,7 @@ private fun AppearancePane(
     onWallpaper: (Int) -> Unit,
     onGlassBlur: (Boolean) -> Unit,
     onColumns: (Int) -> Unit,
+    onLauncherStyle: (LauncherStyle) -> Unit,
     onPickImage: () -> Unit,
     onUseImage: () -> Unit,
     favoriteApps: List<AppInfo>,
@@ -352,9 +356,23 @@ private fun AppearancePane(
     ) {
         PaneTitle("Appearance")
 
-        // Order: the fundamentals people reach for first (theme, grid density, wallpaper), then the
-        // wallpaper family grouped together, then chrome/extras, with the experimental motion switch
-        // last — it's an aesthetic nicety, not something you tune often.
+        // The most fundamental choice sits first: the whole home-screen style. The rest of this pane
+        // tunes the details within the chosen style (theme, grid density, wallpaper), then chrome/extras.
+        SectionLabel("Launcher style")
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToggleChip("tvOS", settings.launcherStyle == LauncherStyle.TVOS) { onLauncherStyle(LauncherStyle.TVOS) }
+            ToggleChip("Windows Metro", settings.launcherStyle == LauncherStyle.WINDOWS_METRO) {
+                onLauncherStyle(LauncherStyle.WINDOWS_METRO)
+            }
+        }
+        Text(
+            "tvOS shows wide banner cards with a frosted dock. Windows Metro shows flat live tiles with " +
+                "the tile scatter-and-zoom launch.",
+            color = LocalLauncherColors.current.textDim,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        )
+
         SectionLabel("Theme")
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             ToggleChip("Dark", theme == ThemeMode.DARK) { onTheme(ThemeMode.DARK) }

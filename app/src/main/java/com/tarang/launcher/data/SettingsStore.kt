@@ -22,6 +22,15 @@ const val DEFAULT_COLUMNS = 4
 /** Light/dark appearance. [AUTO] follows the time of day (light 7am–7pm, dark otherwise). */
 enum class ThemeMode { DARK, LIGHT, AUTO }
 
+/**
+ * The home-screen look and feel. Scalable: add a new console-style entry here (e.g. PLAYSTATION) and
+ * a matching home surface, then wire it into the settings toggle and [LauncherScreen].
+ *
+ * - [TVOS]           the default tvOS-inspired banner-card grid with a frosted dock.
+ * - [WINDOWS_METRO]  Windows 8.1 Metro: flat live-tile grid with the tile scatter/zoom launch.
+ */
+enum class LauncherStyle { TVOS, WINDOWS_METRO }
+
 /** What the Frame Art mode (the "painting" full-screen view) displays. */
 enum class FrameSource {
     /** Show whatever wallpaper is currently set (the default). */
@@ -66,6 +75,8 @@ data class LauncherSettings(
     val glassBlur: Boolean = false,
     /** How many app tiles per row in the grid (and the dock). */
     val columns: Int = DEFAULT_COLUMNS,
+    /** The home-screen look and feel (tvOS banner cards vs. Windows Metro live tiles). */
+    val launcherStyle: LauncherStyle = LauncherStyle.TVOS,
     /** When true (and [wallpaperImagePath] resolves) the photo is shown instead of a gradient. */
     val useImageWallpaper: Boolean = false,
     /** Absolute path to the user's chosen wallpaper, copied into app storage. */
@@ -135,6 +146,8 @@ class SettingsStore(context: Context) {
             wallpaperId = p[WALLPAPER_ID] ?: 0,
             glassBlur = p[GLASS_BLUR] ?: false,
             columns = (p[COLUMNS] ?: DEFAULT_COLUMNS).coerceIn(MIN_COLUMNS, MAX_COLUMNS),
+            launcherStyle = runCatching { LauncherStyle.valueOf(p[LAUNCHER_STYLE] ?: "TVOS") }
+                .getOrDefault(LauncherStyle.TVOS),
             useImageWallpaper = p[USE_IMAGE] ?: false,
             wallpaperImagePath = p[IMAGE_PATH],
             useAppArtwork = p[USE_APP_ARTWORK] ?: false,
@@ -181,6 +194,7 @@ class SettingsStore(context: Context) {
 
     suspend fun setGlassBlur(value: Boolean) = dataStore.edit { it[GLASS_BLUR] = value }
     suspend fun setColumns(n: Int) = dataStore.edit { it[COLUMNS] = n.coerceIn(MIN_COLUMNS, MAX_COLUMNS) }
+    suspend fun setLauncherStyle(style: LauncherStyle) = dataStore.edit { it[LAUNCHER_STYLE] = style.name }
 
     /** Records a freshly picked photo and makes it the active wallpaper. */
     suspend fun setImageWallpaper(path: String) = dataStore.edit {
@@ -257,6 +271,7 @@ class SettingsStore(context: Context) {
         val WALLPAPER_ID = intPreferencesKey("wallpaper_id")
         val GLASS_BLUR = booleanPreferencesKey("glass_blur")
         val COLUMNS = intPreferencesKey("columns")
+        val LAUNCHER_STYLE = stringPreferencesKey("launcher_style")
         val USE_IMAGE = booleanPreferencesKey("use_image_wallpaper")
         val IMAGE_PATH = stringPreferencesKey("wallpaper_image_path")
         val USE_APP_ARTWORK = booleanPreferencesKey("use_app_artwork")
