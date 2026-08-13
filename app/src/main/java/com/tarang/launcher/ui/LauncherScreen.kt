@@ -167,9 +167,6 @@ fun LauncherScreen(
     val visibleGrid = remember(uiState.gridApps, settings.hiddenApps) {
         uiState.gridApps.filterNot { it.packageName in settings.hiddenApps }
     }
-    // The Metro Start screen is one flat tile grid: favorites first, then the rest. This ordering is
-    // shared with launchApp so the launched tile's index (the scatter origin) lines up with the grid.
-    val metroApps = remember(uiState.dockApps, visibleGrid) { uiState.dockApps + visibleGrid }
     val preset = WallpaperPresets.getOrElse(settings.wallpaperId) { WallpaperPresets.first() }
     val imagePath = settings.wallpaperImagePath
     val showImage = settings.useImageWallpaper && imagePath != null && remember(imagePath) { File(imagePath).exists() }
@@ -323,12 +320,10 @@ fun LauncherScreen(
         }
     }
 
-    // Metro launch: its own progress (0 = home, 1 = launched) driving the tile scatter/zoom, plus the
-    // launched tile's index in [metroApps] (the scatter origin). Separate from the tvOS dock ripple so
-    // each style keeps its own timing; only the active style's Animatable is ever animated. MetroHome
-    // owns the scatter geometry (it knows the board's row count), so it just reads these two.
+    // Metro launch: its own progress (0 = home, 1 = app in front) driving the Windows 8.1 slide/overlay.
+    // Separate from the tvOS dock ripple so each style keeps its own timing; only the active style's
+    // Animatable is ever animated. MetroHome owns the per-tile geometry, so it just reads this progress.
     val metroLaunch = remember { Animatable(0f) }
-    var launchMetroIndex by remember { mutableIntStateOf(-1) }
 
     fun launchApp(packageName: String) {
         // No window scale-up — the app opens with the system default while the launcher chrome does the
@@ -337,7 +332,6 @@ fun LauncherScreen(
         sounds.click()
         val metro = settings.launcherStyle == LauncherStyle.WINDOWS_METRO
         if (metro) {
-            launchMetroIndex = metroApps.indexOfFirst { it.packageName == packageName }
             launchDockIndex = -1
         } else {
             launchDockIndex = uiState.dockApps.indexOfFirst { it.packageName == packageName }
@@ -404,10 +398,7 @@ fun LauncherScreen(
             if (settings.launcherStyle == LauncherStyle.WINDOWS_METRO) {
                 metroLaunch.snapTo(1f)
                 topBarLaunch.snapTo(1f)
-                launch {
-                    metroLaunch.animateTo(0f, metroLaunchSpec(entering = false))
-                    launchMetroIndex = -1
-                }
+                launch { metroLaunch.animateTo(0f, metroLaunchSpec(entering = false)) }
                 launch {
                     topBarLaunch.animateTo(0f, metroLaunchSpec(entering = false))
                     // Chrome is back at rest — re-focus the glass gradually (over 650ms) at the end.
@@ -645,7 +636,6 @@ fun LauncherScreen(
                             favorites = uiState.dockApps,
                             others = visibleGrid,
                             iconLoader = container.iconLoader,
-                            launchOrigin = launchMetroIndex,
                             launchProgress = { metroLaunch.value },
                             onAppFocused = viewModel::onAppFocused,
                             onAppClicked = { pkg -> launchApp(pkg) },

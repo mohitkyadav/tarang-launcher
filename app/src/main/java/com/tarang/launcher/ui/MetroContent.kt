@@ -6,6 +6,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
@@ -46,7 +47,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
@@ -70,8 +70,9 @@ private const val MetroMaxRows = 5
  * rest. With no favorites there is a single group and no gutter.
  *
  * D-pad Up/Down moves within a column; Left/Right crosses columns (and the gutter) and scrolls the
- * board. The shared top bar (clock / Frame Art / settings) rides in through [topBar]; [launchOrigin]
- * and [launchProgress] carry the launch/return scatter driven by [LauncherScreen].
+ * board. The shared top bar (clock / Frame Art / settings) rides in through [topBar]. [launchProgress]
+ * (0 = home, 1 = app in front) drives the Windows 8.1 build-in: a dark overlay plus the per-column
+ * slide-in wave (see Motion.kt). The cold-start entrance plays the same wave.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -79,7 +80,6 @@ fun MetroHome(
     favorites: List<AppInfo>,
     others: List<AppInfo>,
     iconLoader: IconLoader,
-    launchOrigin: Int,
     launchProgress: () -> Float,
     onAppFocused: (String) -> Unit,
     onAppClicked: (String) -> Unit,
@@ -92,82 +92,99 @@ fun MetroHome(
     val listState = rememberLazyListState()
     val density = LocalDensity.current
 
-    // Entrance cascade: runs once when the Start screen appears (and again on a switch into Metro).
-    // Read lazily at draw time so it never triggers a recomposition.
-    val appear = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { appear.animateTo(1f, metroAppearSpec()) }
+    // Cold-start entrance: the tiles start "gone" (off to the right) and slide home once, in the same
+    // right-to-left wave a return uses. Read lazily at draw time so it never triggers a recomposition.
+    val appear = remember { Animatable(1f) }
+    LaunchedEffect(Unit) { appear.animateTo(0f, metroAppearSpec()) }
     val appearProgress = remember { { appear.value } }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        topBar()
-        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            // Derive the row count (and therefore the tile size) from the board height.
-            val rows = ((maxHeight.value + MetroGap.value) / (MetroTargetTile.value + MetroGap.value))
-                .toInt().coerceIn(MetroMinRows, MetroMaxRows)
-            val tileSize = (maxHeight - MetroGap * (rows - 1)) / rows
+    Box(modifier = modifier.fillMaxSize()) {
+        // The dark backdrop over the wallpaper (behind the tiles). It rests at full while the Start
+        // screen is home and fades in as the board returns; it clears as an app takes the front. Driven
+        // by whichever transition is active (the cold-start entrance or a launch/return).
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = metroOverlayAlpha(maxOf(launchProgress(), appearProgress())) }
+                .background(Color.Black),
+        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            topBar()
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    // The whole tile board scales as one group (0.8 → 1); the per-tile layers only
+                    // slide and fade. Read at draw time so it never triggers a recomposition.
+                    .graphicsLayer {
+                        val s = metroGroupScale(maxOf(launchProgress(), appearProgress()))
+                        scaleX = s
+                        scaleY = s
+                    },
+            ) {
+                // Derive the row count (and therefore the tile size) from the board height.
+                val rows = ((maxHeight.value + MetroGap.value) / (MetroTargetTile.value + MetroGap.value))
+                    .toInt().coerceIn(MetroMinRows, MetroMaxRows)
+                val tileSize = (maxHeight - MetroGap * (rows - 1)) / rows
 
-            val favCols = remember(favorites, rows) { favorites.chunked(rows) }
-            val restCols = remember(others, rows) { others.chunked(rows) }
-            val favCount = favorites.size
+                val favCols = remember(favorites, rows) { favorites.chunked(rows) }
+                val restCols = remember(others, rows) { others.chunked(rows) }
+                val favCount = favorites.size
+                val maxCol = favCols.size + restCols.size - 1
 
-            val scatter = remember(launchOrigin, rows, favCount, flatSize) {
-                if (launchOrigin in 0 until flatSize) {
-                    MetroLaunch(launchOrigin, rows, favCount, launchProgress)
-                } else {
-                    null
+                // Same scale-halo slop as the tvOS grid, so the first Left/Right move never nudges.
+                val bringIntoView = remember(tileSize, density) {
+                    minimalBringIntoView(with(density) { tileSize.toPx() } * 0.08f + 3f)
                 }
-            }
 
-            // Same scale-halo slop as the tvOS grid, so the first Left/Right move never nudges.
-            val bringIntoView = remember(tileSize, density) {
-                minimalBringIntoView(with(density) { tileSize.toPx() } * 0.08f + 3f)
-            }
-
-            CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoView) {
-                LazyRow(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        start = MetroSidePad,
-                        end = MetroSidePad,
-                        top = MetroTopPad,
-                        bottom = 8.dp,
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(MetroGap),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    itemsIndexed(favCols, key = { _, col -> "fav-" + col.first().packageName }) { ci, col ->
-                        MetroColumn(
-                            apps = col,
-                            iconLoader = iconLoader,
-                            tileSize = tileSize,
-                            absoluteCol = ci,
-                            flatStart = ci * rows,
-                            scatter = scatter,
-                            appearProgress = appearProgress,
-                            firstCard = firstCard,
-                            topFocusRequester = topFocusRequester,
-                            onAppFocused = onAppFocused,
-                            onAppClicked = onAppClicked,
-                        )
-                    }
-                    if (favCols.isNotEmpty() && restCols.isNotEmpty()) {
-                        item(key = "gutter") { Spacer(Modifier.width(MetroGutter)) }
-                    }
-                    itemsIndexed(restCols, key = { _, col -> "rest-" + col.first().packageName }) { ci, col ->
-                        MetroColumn(
-                            apps = col,
-                            iconLoader = iconLoader,
-                            tileSize = tileSize,
-                            absoluteCol = favCols.size + ci,
-                            flatStart = favCount + ci * rows,
-                            scatter = scatter,
-                            appearProgress = appearProgress,
-                            firstCard = firstCard,
-                            topFocusRequester = topFocusRequester,
-                            onAppFocused = onAppFocused,
-                            onAppClicked = onAppClicked,
-                        )
+                CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoView) {
+                    LazyRow(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = MetroSidePad,
+                            end = MetroSidePad,
+                            top = MetroTopPad,
+                            bottom = 8.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(MetroGap),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        itemsIndexed(favCols, key = { _, col -> "fav-" + col.first().packageName }) { ci, col ->
+                            MetroColumn(
+                                apps = col,
+                                iconLoader = iconLoader,
+                                tileSize = tileSize,
+                                absoluteCol = ci,
+                                maxCol = maxCol,
+                                flatStart = ci * rows,
+                                launchProgress = launchProgress,
+                                appearProgress = appearProgress,
+                                firstCard = firstCard,
+                                topFocusRequester = topFocusRequester,
+                                onAppFocused = onAppFocused,
+                                onAppClicked = onAppClicked,
+                            )
+                        }
+                        if (favCols.isNotEmpty() && restCols.isNotEmpty()) {
+                            item(key = "gutter") { Spacer(Modifier.width(MetroGutter)) }
+                        }
+                        itemsIndexed(restCols, key = { _, col -> "rest-" + col.first().packageName }) { ci, col ->
+                            MetroColumn(
+                                apps = col,
+                                iconLoader = iconLoader,
+                                tileSize = tileSize,
+                                absoluteCol = favCols.size + ci,
+                                maxCol = maxCol,
+                                flatStart = favCount + ci * rows,
+                                launchProgress = launchProgress,
+                                appearProgress = appearProgress,
+                                firstCard = firstCard,
+                                topFocusRequester = topFocusRequester,
+                                onAppFocused = onAppFocused,
+                                onAppClicked = onAppClicked,
+                            )
+                        }
                     }
                 }
             }
@@ -186,8 +203,9 @@ private fun MetroColumn(
     iconLoader: IconLoader,
     tileSize: Dp,
     absoluteCol: Int,
+    maxCol: Int,
     flatStart: Int,
-    scatter: MetroLaunch?,
+    launchProgress: () -> Float,
     appearProgress: () -> Float,
     firstCard: FocusRequester,
     topFocusRequester: FocusRequester?,
@@ -206,15 +224,14 @@ private fun MetroColumn(
                 // Only the top tile of each column sends D-pad UP to the top bar (settings button).
                 upFocusRequester = if (positionInColumn == 0) topFocusRequester else null,
                 layer = {
-                    applyMetroAppear(appearProgress(), positionInColumn, absoluteCol)
-                    scatter?.tileLayer(flatIndex)?.invoke(this)
+                    // The tile slides for whichever is larger: the one-shot entrance or a launch/return.
+                    val gone = maxOf(
+                        metroGone(appearProgress(), absoluteCol, maxCol),
+                        metroGone(launchProgress(), absoluteCol, maxCol),
+                    )
+                    applyMetroSlide(gone)
                 },
-                modifier = Modifier
-                    .then(if (flatIndex == 0) Modifier.focusRequester(firstCard) else Modifier)
-                    // The hero tile draws over its neighbours as it zooms out.
-                    .then(
-                        if (scatter != null && flatIndex == scatter.origin) Modifier.zIndex(10f) else Modifier,
-                    ),
+                modifier = if (flatIndex == 0) Modifier.focusRequester(firstCard) else Modifier,
             )
         }
     }
@@ -224,7 +241,7 @@ private fun MetroColumn(
  * One Metro tile: a flat, sharp-cornered square in the app's accent color, with the icon centered and
  * the label in the bottom-left. The text color flips with the tile's luminance so it stays legible on
  * any accent. On focus the tile scales up a touch and gains a white outline. [layer] carries the
- * entrance cascade and launch scatter; it composes on top of the focus scale.
+ * entrance/launch slide; it composes on top of the focus scale.
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
