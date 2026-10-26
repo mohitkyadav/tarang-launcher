@@ -19,8 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
@@ -103,13 +101,19 @@ fun AppCard(
         onLongClick = onLongClick,
         modifier = modifier
             .size(width = tileWidth, height = tileHeight)
+            // ONE layer for scale, dim and shadow. Separate .alpha() and .shadow() modifiers each add a
+            // layer per tile, and reading the animated elevation in composition recomposed the tile on
+            // every frame of the focus spring. Here both are read at draw time. The launch ripple runs
+            // last: it multiplies alpha and scale, so the dim and the focus scale compose with it.
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
+                alpha = if (dimmed) 0.4f else 1f
+                shadowElevation = elevation.toPx()
+                shape = tileShape
+                clip = false
                 launchLayer?.invoke(this)
             }
-            .alpha(if (dimmed) 0.4f else 1f)
-            .shadow(elevation = elevation, shape = tileShape, clip = false)
             // Focus ring: a scale alone is hard to read over a busy wallpaper, so the focused tile also
             // gets a soft high-contrast border. (Not while it's flying out in a launch.)
             .then(

@@ -1,6 +1,7 @@
 package com.tarang.launcher.ui
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
@@ -16,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -28,8 +30,11 @@ import java.io.File
  */
 @Composable
 fun ImageWallpaper(path: String, isDark: Boolean, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val image by produceState<ImageBitmap?>(initialValue = null, key1 = path) {
-        value = withContext(Dispatchers.IO) { decodeSampled(path, 1920, 1080) }
+        // Decode to the display's own size: a 720p TV holds a 3.7 MB bitmap, not a 1080p+ one.
+        val screen = screenSizePx(context)
+        value = withContext(Dispatchers.IO) { decodeSampled(path, screen.width, screen.height) }
     }
     Box(modifier = modifier) {
         val img = image
@@ -60,31 +65,35 @@ fun rememberWallpaperThumb(path: String?): ImageBitmap? {
 /**
  * Copies the picked image into `filesDir/<subdir>/` and returns the new absolute path (null on
  * failure). We copy rather than persist the content URI so the image keeps working after a reboot or
- * if the original is deleted. Old copies in that subdir are cleared first to avoid piling up.
- * [subdir] keeps independent copies apart (e.g. the wallpaper vs. the single Frame Art photo).
+ * if the original is deleted. [subdir] keeps independent copies apart (e.g. the wallpaper vs. the
+ * single Frame Art photo).
+ *
+ * The copy is scaled down once, here, to just cover the screen and saved as a JPEG, so every cold
+ * start decodes a screen-sized file instead of a camera original. An image this code cannot decode
+ * is copied as-is, as before. Old copies are deleted only after the new one is written, so a failed
+ * pick never leaves the setting pointing at a deleted file.
  */
 fun copyImageToInternal(context: Context, uri: Uri, subdir: String = "wallpaper"): String? = runCatching {
     val dir = File(context.filesDir, subdir).apply { mkdirs() }
-    dir.listFiles()?.forEach { it.delete() }
     val out = File(dir, "img_${System.currentTimeMillis()}.jpg")
-    context.contentResolver.openInputStream(uri)?.use { input ->
-        out.outputStream().use { input.copyTo(it) }
-    } ?: return null
+    val screen = screenSizePx(context)
+    val scaled = runCatching {
+        decodeToCover(screen.width, screen.height) { opts ->
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        }
+    }.getOrNull()
+    if (scaled != null) {
+        out.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        scaled.recycle()
+    } else {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { input.copyTo(it) }
+        } ?: return null
+    }
+    dir.listFiles()?.forEach { if (it != out) it.delete() }
     out.absolutePath
 }.getOrNull()
 
 private fun decodeSampled(path: String, reqW: Int, reqH: Int): ImageBitmap? = runCatching {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(path, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    val opts = BitmapFactory.Options().apply { inSampleSize = calcInSampleSize(bounds, reqW, reqH) }
-    BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+    decodeToCover(reqW, reqH) { opts -> BitmapFactory.decodeFile(path, opts) }?.asImageBitmap()
 }.getOrNull()
-
-private fun calcInSampleSize(options: BitmapFactory.Options, reqW: Int, reqH: Int): Int {
-    var sample = 1
-    var halfH = options.outHeight / 2
-    var halfW = options.outWidth / 2
-    while (halfH / sample >= reqH && halfW / sample >= reqW) sample *= 2
-    return sample
-}

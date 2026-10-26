@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -201,6 +202,9 @@ fun LauncherScreen(
     // Wall-clock of the last backdrop capture (a plain holder, not state — read/written in draw without
     // triggering recomposition), used to throttle the capture to ~20fps for an animated wallpaper.
     val lastBackdropCapture = remember { longArrayOf(0L) }
+    // Glass blur needs RenderEffect (Android 12+). Below that the setting changes nothing: skip the
+    // full-screen backdrop capture and keep the opaque tint, as if the setting were off.
+    val glassBlur = settings.glassBlur && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val isDark = rememberIsDark(settings.theme)
     val colors = if (isDark) DarkLauncherColors else LightLauncherColors
 
@@ -257,7 +261,7 @@ fun LauncherScreen(
     LaunchedEffect(frameOn) {
         if (frameOn) {
             // Entry: clear the glass first (if blur is on), then dissolve into the painting.
-            if (settings.glassBlur) blurFade.animateTo(0f, tween(300))
+            if (glassBlur) blurFade.animateTo(0f, tween(300))
             launch { frameProgress.animateTo(1f, frameMasterSpec()) }
             launch { dockProgress.animateTo(1f, frameDockSpec()) }
             launch { topBarProgress.animateTo(1f, frameTopBarSpec()) }
@@ -337,7 +341,7 @@ fun LauncherScreen(
         scope.launch {
             // First, when the frosted glass is on, clear it (blur -> 0 over 300ms) before the move — a
             // two-stage open. With blur off there is nothing to clear, so fly immediately.
-            if (settings.glassBlur) blurFade.animateTo(0f, tween(300))
+            if (glassBlur) blurFade.animateTo(0f, tween(300))
             launchTick++ // start the launch animation
             // Hold the actual app start until the dock ripple has played (see Motion.kt), so a
             // fast-starting app can't cover the move halfway through. awaitingReturn stays false through
@@ -463,7 +467,7 @@ fun LauncherScreen(
                     // Skip the per-frame frosted backdrop capture during a launch zoom, once any Frame
                     // Art is showing, or when glass blur is turned off entirely (no one samples it then)
                     // — draw straight to the screen.
-                    if (transitioning || framePartly || !settings.glassBlur) {
+                    if (transitioning || framePartly || !glassBlur) {
                         drawContent()
                     } else {
                         // Throttle the (full-screen, GPU-heavy) capture to ~20fps: an animated wallpaper
@@ -639,7 +643,7 @@ fun LauncherScreen(
                             // 60fps through the transition. Full frosted glass returns at rest.
                             glassLive = !transitioning && !frameMoving,
                             glassRefract = !transitioning && !frameMoving,
-                            glassBlur = settings.glassBlur,
+                            glassBlur = glassBlur,
                         )
                     }
                     val availableUpdate = updateState as? com.tarang.launcher.viewmodel.UpdateUiState.Available
@@ -698,7 +702,7 @@ fun LauncherScreen(
                                 onUninstall = { viewModel.uninstallApp(it) },
                                 glassLive = !transitioning && !frameMoving,
                                 glassRefract = !transitioning && !frameMoving,
-                                glassBlur = settings.glassBlur,
+                                glassBlur = glassBlur,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }

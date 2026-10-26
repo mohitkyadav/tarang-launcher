@@ -1,6 +1,7 @@
 package com.tarang.launcher.ui
 
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -481,13 +482,22 @@ private fun AppearancePane(
         )
 
         SectionLabel("Glass blur")
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ToggleChip("On", settings.glassBlur) { onGlassBlur(true) }
-            ToggleChip("Off", !settings.glassBlur) { onGlassBlur(false) }
+        // Blur needs Android 12 (RenderEffect). Below that the launcher ignores the setting, so offer
+        // no toggle that does nothing.
+        val blurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        if (blurSupported) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                ToggleChip("On", settings.glassBlur) { onGlassBlur(true) }
+                ToggleChip("Off", !settings.glassBlur) { onGlassBlur(false) }
+            }
         }
         Text(
-            "Frosts the wallpaper behind the top bar and dock. Turning it off (a flat tint instead) is " +
-                "the single biggest GPU saving on a slower TV.",
+            if (blurSupported) {
+                "Frosts the wallpaper behind the top bar and dock. Turning it off (a flat tint instead) is " +
+                    "the single biggest GPU saving on a slower TV."
+            } else {
+                "Glass blur needs Android 12 or later. This TV shows a flat tint behind the top bar and dock."
+            },
             color = LocalLauncherColors.current.textDim,
             fontSize = 13.sp,
             modifier = Modifier.fillMaxWidth(0.85f),

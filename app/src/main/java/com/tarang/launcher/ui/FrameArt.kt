@@ -155,8 +155,8 @@ fun FrameSlideshow(
         if (photos.isEmpty()) {
             value = null
         } else {
-            // Reuse the artwork loader: it decodes content:// URIs down-sampled and LRU-caches them.
-            value = ArtworkLoader.load(context, photos[index % photos.size].toString(), 1920, 1080) ?: value
+            // Reuse the artwork loader: it decodes content:// URIs to the display size and LRU-caches them.
+            value = ArtworkLoader.load(context, photos[index % photos.size].toString()) ?: value
         }
     }
 

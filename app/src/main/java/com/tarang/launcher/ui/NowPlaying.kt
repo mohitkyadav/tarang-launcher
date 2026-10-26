@@ -6,6 +6,8 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -17,7 +19,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.NotificationManagerCompat
 import com.tarang.launcher.media.TarangNotificationListenerService
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 
 /** A snapshot of whatever's currently playing, for the top-bar chip. */
 data class NowPlaying(val title: String, val artist: String?, val art: ImageBitmap?, val packageName: String)
@@ -35,9 +37,14 @@ private fun NowPlaying?.sameDisplay(other: NowPlaying?): Boolean = when {
 }
 
 /**
- * Polls the active media sessions while the launcher is visible and [enabled], returning the currently
- * *playing* session (or null — including when notification access hasn't been granted, since reading
- * sessions then throws and is swallowed). Polling (vs. a live listener) keeps it simple and robust.
+ * Watches the active media sessions while the launcher is visible and [enabled], returning the
+ * currently *playing* session (or null — including when notification access hasn't been granted,
+ * since reading sessions then throws and is swallowed).
+ *
+ * Event-driven: it re-reads only when the session list, a playback state or the metadata changes,
+ * instead of waking every 2.5 s. Without notification access the listener can't be registered and
+ * the chip stays empty; granting access happens in system Settings, and coming back restarts this
+ * block (the launcher goes STOPPED → STARTED), which registers it then.
  */
 @Composable
 fun rememberNowPlaying(enabled: Boolean): NowPlaying? {
@@ -48,10 +55,36 @@ fun rememberNowPlaying(enabled: Boolean): NowPlaying? {
         val msm = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
             ?: return@RunWhileStarted
         val component = ComponentName(context, TarangNotificationListenerService::class.java)
-        while (true) {
-            val fresh = readNowPlaying(msm, component)
-            if (!fresh.sameDisplay(np)) np = fresh
-            delay(2500)
+        val main = Handler(Looper.getMainLooper())
+        val changed = Channel<Unit>(Channel.CONFLATED)
+        val controllerCallback = object : MediaController.Callback() {
+            override fun onPlaybackStateChanged(state: PlaybackState?) { changed.trySend(Unit) }
+            override fun onMetadataChanged(metadata: MediaMetadata?) { changed.trySend(Unit) }
+            override fun onSessionDestroyed() { changed.trySend(Unit) }
+        }
+        var watched: List<MediaController> = emptyList()
+        fun watch(controllers: List<MediaController>) {
+            watched.forEach { it.unregisterCallback(controllerCallback) }
+            watched = controllers
+            controllers.forEach { it.registerCallback(controllerCallback, main) }
+            changed.trySend(Unit)
+        }
+        val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { watch(it.orEmpty()) }
+        val listening = runCatching { msm.addOnActiveSessionsChangedListener(sessionsListener, component, main) }.isSuccess
+        if (!listening) {
+            np = null
+            return@RunWhileStarted
+        }
+        try {
+            watch(runCatching { msm.getActiveSessions(component) }.getOrDefault(emptyList()))
+            while (true) {
+                changed.receive()
+                val fresh = readNowPlaying(msm, component)
+                if (!fresh.sameDisplay(np)) np = fresh
+            }
+        } finally {
+            runCatching { msm.removeOnActiveSessionsChangedListener(sessionsListener) }
+            watched.forEach { it.unregisterCallback(controllerCallback) }
         }
     }
     return if (enabled) np else null

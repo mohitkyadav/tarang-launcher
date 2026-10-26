@@ -69,11 +69,18 @@ private val TopFadeHeight = 64.dp
 /**
  * Fade the top of this layer to transparent. Uses an offscreen buffer + DstIn so only alpha is
  * masked — no blur pass, cheap enough for the Streamer GPU.
+ *
+ * [active] is read at draw time. When it is false the layer draws straight to the screen: no
+ * offscreen buffer and no DstIn pass. Pass it only while content can sit under the fade (the list is
+ * scrolled). At rest the grid starts below [MinTopGap], which is taller than the fade.
  */
-private fun Modifier.topFadeMask(fadeHeight: Dp): Modifier =
-    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+private fun Modifier.topFadeMask(fadeHeight: Dp, active: () -> Boolean): Modifier =
+    graphicsLayer {
+        compositingStrategy = if (active()) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+    }
         .drawWithContent {
             drawContent()
+            if (!active()) return@drawWithContent
             val fadePx = fadeHeight.toPx().coerceAtMost(size.height)
             if (fadePx <= 0f) return@drawWithContent
             drawRect(
@@ -207,7 +214,7 @@ fun LauncherContent(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .topFadeMask(TopFadeHeight),
+                .topFadeMask(TopFadeHeight) { listState.canScrollBackward },
             // No horizontal content padding: the grid rows and the dock apply their own side insets, so
             // the dock's frosted bar can reach a DockPad past the grid margin (see the dock item below).
             contentPadding = PaddingValues(top = topGap, bottom = 56.dp),

@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.graphics.drawable.Drawable
 import android.util.LruCache
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
 import androidx.palette.graphics.Palette
@@ -39,7 +40,16 @@ sealed interface TileArt {
 class IconLoader(context: Context) {
 
     private val pm: PackageManager = context.applicationContext.packageManager
-    private val tileCache = LruCache<String, TileArt>(CACHE_ENTRIES)
+    // Bounded by bytes so a TV with hundreds of apps can't grow it without limit (sizes in KB).
+    private val tileCache = object : LruCache<String, TileArt>(TILE_CACHE_KB) {
+        override fun sizeOf(key: String, value: TileArt): Int {
+            val bitmap = when (value) {
+                is TileArt.Banner -> value.image
+                is TileArt.Fallback -> value.icon
+            }
+            return ((bitmap?.asAndroidBitmap()?.allocationByteCount ?: 0) / 1024).coerceAtLeast(1)
+        }
+    }
     private val colorCache = LruCache<String, Int>(CACHE_ENTRIES)
 
     private val diskDir = File(context.applicationContext.filesDir, "tiles")
@@ -78,7 +88,11 @@ class IconLoader(context: Context) {
         // from the cached app list) still serves the disk art: the real scan drops the tile shortly.
         val current = packageStamp(app.packageName)
         if (current != UNKNOWN_STAMP && current != entry.stamp) return null
-        val bitmap = runCatching { BitmapFactory.decodeFile(bitmapFile(app.packageName).path) }.getOrNull()
+        // Banners are opaque, so RGB_565 holds them at half the memory of ARGB_8888.
+        val opts = BitmapFactory.Options().apply {
+            if (entry.banner) inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        val bitmap = runCatching { BitmapFactory.decodeFile(bitmapFile(app.packageName).path, opts) }.getOrNull()
         return when {
             entry.banner -> bitmap?.let { TileArt.Banner(it.asImageBitmap()) }
             else -> TileArt.Fallback(bitmap?.asImageBitmap(), Color(entry.color))
@@ -90,7 +104,7 @@ class IconLoader(context: Context) {
         val stamp = packageStamp(app.packageName)
         val banner = resolveBanner(app)
         if (banner != null) {
-            val bmp = banner.toBitmap(BANNER_W, BANNER_H)
+            val bmp = banner.toBitmap(BANNER_W, BANNER_H, Bitmap.Config.RGB_565)
             persistTile(app.packageName, bmp, DiskTile(banner = true, color = 0, stamp = stamp))
             return TileArt.Banner(bmp.asImageBitmap())
         }
@@ -167,6 +181,7 @@ class IconLoader(context: Context) {
 
     private companion object {
         const val CACHE_ENTRIES = 256
+        const val TILE_CACHE_KB = 16 * 1024 // ~140 banners at 320×180 RGB_565
         const val BANNER_W = 320
         const val BANNER_H = 180 // 16:9 native banner; the UI crops it to the 5:3 tile
         const val ICON_PX = 144

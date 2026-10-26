@@ -42,7 +42,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 strips Compose's debug and source-information calls and inlines small functions.
+            // Without it every composition did that extra work (64% janky frames on a 32-bit MiTV).
+            isMinifyEnabled = true
+            isShrinkResources = true
             // Falls back to the debug key when keystore.properties is absent (e.g. a fresh
             // checkout before the release keystore is set up), so the project still builds.
             signingConfig = if (keystoreProperties.containsKey("storeFile")) {
